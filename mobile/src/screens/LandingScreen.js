@@ -69,11 +69,7 @@ function NativeLanding({ onEnter, onMinistry }) {
         {/* header */}
         <View style={styles.topbar}>
           <View style={styles.brand}>
-            <Logo size={40} />
-            <View>
-              <Text style={[styles.brandWord, { color: c.ink }]}>Kobciye</Text>
-              <Text style={[styles.brandSub, { color: c.muted }]}>School Management</Text>
-            </View>
+            <Logo size={36} />
           </View>
           <View style={styles.headRight}>
             <View style={[styles.langWrap, { backgroundColor: c.surface, borderColor: c.line2 }]}>

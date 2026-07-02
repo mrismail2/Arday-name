@@ -18,8 +18,7 @@ export default function Sidebar({ active, onNavigate }) {
     <View style={[styles.sidebar, { backgroundColor: c.surface, borderRightColor: c.line }]}>
       {/* brand — Kobciye app logo (no upload badge) */}
       <View style={[styles.brand, { borderBottomColor: c.line }]}>
-        <Logo size={38} />
-        <Text style={[styles.brandWord, { color: c.ink }]}>Kobciye</Text>
+        <Logo size={34} />
       </View>
 
       <Text style={[styles.navLabel, { color: c.muted2 }]}>MENU</Text>

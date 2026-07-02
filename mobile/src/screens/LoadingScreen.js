@@ -1,6 +1,7 @@
 import React, { useEffect, useRef } from 'react';
 import { View, Text, StyleSheet, Animated, Easing, Dimensions } from 'react-native';
 import Svg, { Defs, LinearGradient, Stop, Rect } from 'react-native-svg';
+import Logo from '../components/Logo';
 
 /* Splash / loading screen — a faithful port of the web app's kob-loader:
    navy→blue gradient, a pulsing circular brand mark, and "Kobciye".
@@ -41,13 +42,10 @@ export default function LoadingScreen({ onDone }) {
         <Rect x="0" y="0" width={width} height={height} fill="url(#g)" />
       </Svg>
 
-      {/* pulsing brand mark */}
+      {/* pulsing brand mark — official Kobciye wordmark (white) */}
       <Animated.View style={[styles.markRing, { transform: [{ scale }], shadowRadius: ring }]}>
-        <View style={styles.mark}>
-          <Text style={styles.markTxt}>K</Text>
-        </View>
+        <Logo size={52} variant="white" />
       </Animated.View>
-      <Text style={styles.brand}>Kobciye</Text>
     </Animated.View>
   );
 }
@@ -55,11 +53,8 @@ export default function LoadingScreen({ onDone }) {
 const styles = StyleSheet.create({
   root: { ...StyleSheet.absoluteFillObject, alignItems: 'center', justifyContent: 'center', gap: 14, zIndex: 9999 },
   markRing: {
-    width: 84, height: 84, borderRadius: 42, alignItems: 'center', justifyContent: 'center',
+    paddingVertical: 26, paddingHorizontal: 30, borderRadius: 24, alignItems: 'center', justifyContent: 'center',
     backgroundColor: 'rgba(255,255,255,0.12)',
     shadowColor: '#fff', shadowOpacity: 0.15, shadowOffset: { width: 0, height: 0 }, elevation: 8,
   },
-  mark: { width: 64, height: 64, borderRadius: 32, backgroundColor: '#fff', alignItems: 'center', justifyContent: 'center' },
-  markTxt: { color: '#0A2E6B', fontSize: 32, fontWeight: '800' },
-  brand: { color: '#fff', fontSize: 18, fontWeight: '700', letterSpacing: 0.5, opacity: 0.92, marginTop: 14 },
 });

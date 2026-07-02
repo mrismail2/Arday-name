@@ -28,8 +28,7 @@ export default function LoginScreen({ onAuthed, goRegister, goForgot }) {
         <ScrollView contentContainerStyle={styles.content} showsVerticalScrollIndicator={false} keyboardShouldPersistTaps="handled">
           {/* brand */}
           <View style={styles.brand}>
-            <Logo size={56} />
-            <Text style={[styles.brandWord, { color: c.ink }]}>Kobciye</Text>
+            <Logo size={48} />
             <Text style={[styles.brandSub, { color: c.muted }]}>Soo gal akoonkaaga</Text>
           </View>
 

@@ -12,7 +12,6 @@ import RootNavigator from './src/navigation/RootNavigator';
 import LandingScreen from './src/screens/LandingScreen';
 import LoadingScreen from './src/screens/LoadingScreen';
 import MinistryReviewScreen from './src/screens/MinistryReviewScreen';
-import AuthFlow from './src/screens/auth/AuthFlow';
 import { initializeAppData } from './src/services/appDataRepository';
 
 function NavWrapper() {
@@ -21,7 +20,6 @@ function NavWrapper() {
   // seed/migrate the ONE canonical store once on first launch (Phase 1/2 final)
   useEffect(() => { initializeAppData(); }, []);
   const [entered, setEntered] = useState(false);   // passed the landing page
-  const [authed, setAuthed] = useState(false);     // logged in (UI preview)
   const [ministry, setMinistry] = useState(false); // ministry review portal (code-gated)
   const navTheme = {
     ...(isDark ? DarkTheme : DefaultTheme),
@@ -55,22 +53,12 @@ function NavWrapper() {
     );
   }
 
-  // 2) marketing landing page; its CTAs lead to the login flow
+  // 2) marketing landing page; its CTAs enter the app directly
   if (!entered) {
     return (
       <>
         <StatusBar style={isDark ? 'light' : 'dark'} />
         <LandingScreen onEnter={() => setEntered(true)} onMinistry={() => setMinistry(true)} />
-      </>
-    );
-  }
-
-  // 3) frontend-only auth flow (Login / Register School / Forgot Password)
-  if (!authed) {
-    return (
-      <>
-        <StatusBar style={isDark ? 'light' : 'dark'} />
-        <AuthFlow onAuthed={() => setAuthed(true)} />
       </>
     );
   }

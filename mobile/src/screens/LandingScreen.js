@@ -6,17 +6,28 @@ import { radius, shadow } from '../theme/colors';
 import Icon from '../components/Icon';
 import Logo from '../components/Logo';
 import KobciyeLanding from './landing/KobciyeLanding';
+import { useRole } from '../context/RoleContext';
+
+/* Which login tab on the landing enters which section of the app:
+   Dugsiga (staff) → school section (admins & teachers together),
+   Arday → student, Waalid → parent. There is no role picker inside. */
+const LOGIN_ROLE = { staff: 'schooladmin', student: 'student', parent: 'parent' };
 
 /* On the web build we render the landing as a real React component
    (src/screens/landing/KobciyeLanding.js — an exact conversion of
    landing/index.html: same markup, inline styles, copy and behaviour).
-   Submitting the login form calls onEnter → enters the app.
-   Native keeps the React-native rebuild below. */
+   Submitting the login form calls onEnter with the picked tab → enters
+   the app as that role. Native keeps the React-native rebuild below. */
 function WebLanding({ onEnter, onMinistry }) {
+  const { setRole } = useRole();
+  const enter = (loginRole) => {
+    setRole(LOGIN_ROLE[loginRole] || 'schooladmin');
+    onEnter && onEnter();
+  };
   return (
     <View style={{ flex: 1, backgroundColor: '#fff', position: 'relative' }}>
       <div style={{ height: '100vh', overflowY: 'auto', overflowX: 'hidden' }}>
-        <KobciyeLanding onEnter={onEnter} />
+        <KobciyeLanding onEnter={enter} />
       </div>
       {onMinistry ? (
         <TouchableOpacity onPress={onMinistry} style={styles.minFloat} activeOpacity={0.85}>

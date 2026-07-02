@@ -69,7 +69,8 @@ export default function KobciyeLanding({ onEnter, showStats = true, showFreeBann
     openRegister: () => { setModal('register'); setSent(false); },
     openLogin: () => { setModal('login'); setSent(false); },
     closeModal: () => { setModal(null); setSent(false); },
-    submitForm: () => { if (onEnter) { onEnter(); } else { setSent(true); } },
+    // entering the app: the picked login tab (Dugsiga/Arday/Waalid) decides the role
+    submitForm: () => { if (onEnter) { onEnter(loginRole); } else { setSent(true); } },
     stopClick: (e) => e.stopPropagation(),
   };
   for (let i = 0; i < 6; i++) {

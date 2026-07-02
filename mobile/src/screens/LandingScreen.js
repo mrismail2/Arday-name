@@ -1,56 +1,23 @@
-import React, { useState, useEffect, useRef } from 'react';
+import React, { useState } from 'react';
 import { ScrollView, View, Text, StyleSheet, TouchableOpacity, useWindowDimensions, Platform } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { useTheme } from '../theme/ThemeContext';
 import { radius, shadow } from '../theme/colors';
 import Icon from '../components/Icon';
 import Logo from '../components/Logo';
-import landingPageHtml from '../data/landingPageHtml';
+import KobciyeLanding from './landing/KobciyeLanding';
 
-/* On the web build we render the EXACT vanilla HTML/CSS/JS landing (inlined)
-   inside an iframe, so it matches the design pixel-for-pixel. Any CTA inside
-   (Login / Dugsigaaga diiwaan geli / Bilaaw Hadda) posts 'kob-enter' → onEnter.
+/* On the web build we render the landing as a real React component
+   (src/screens/landing/KobciyeLanding.js — an exact conversion of
+   landing/index.html: same markup, inline styles, copy and behaviour).
+   Submitting the login form calls onEnter → enters the app.
    Native keeps the React-native rebuild below. */
 function WebLanding({ onEnter, onMinistry }) {
-  const { width, height } = useWindowDimensions();
-  const ref = useRef(null);
-  // inline scripts inside a srcdoc iframe don't execute, but the doc is
-  // same-origin — so wire every CTA from the host: any [data-modal] button
-  // (Login / Dugsigaaga diiwaan geli / Bilaaw Hadda) enters the app.
-  useEffect(() => {
-    const iframe = ref.current;
-    if (!iframe) return;
-    // poll until the srcdoc has parsed and the CTA buttons exist, then wire them
-    const wire = () => {
-      try {
-        const doc = iframe.contentDocument;
-        const btns = doc && doc.querySelectorAll('[data-modal]');
-        if (btns && btns.length) {
-          btns.forEach((btn) => {
-            if (!btn.__kobWired) {
-              btn.__kobWired = true;
-              btn.addEventListener('click', (e) => { e.preventDefault(); e.stopPropagation(); onEnter && onEnter(); }, true);
-            }
-          });
-          return true;
-        }
-      } catch (_) { /* cross-origin guard */ }
-      return false;
-    };
-    if (wire()) return;
-    let tries = 0;
-    const id = setInterval(() => { tries += 1; if (wire() || tries > 50) clearInterval(id); }, 100);
-    return () => clearInterval(id);
-  }, [onEnter]);
   return (
     <View style={{ flex: 1, backgroundColor: '#fff', position: 'relative' }}>
-      {React.createElement('iframe', {
-        ref,
-        srcDoc: landingPageHtml,
-        title: 'Kobciye',
-        width, height,
-        style: { border: 'none', width: '100%', height: '100%', minHeight: height, display: 'block' },
-      })}
+      <div style={{ height: '100vh', overflowY: 'auto', overflowX: 'hidden' }}>
+        <KobciyeLanding onEnter={onEnter} />
+      </div>
       {onMinistry ? (
         <TouchableOpacity onPress={onMinistry} style={styles.minFloat} activeOpacity={0.85}>
           <Icon name="shield" size={13} color="#fff" />

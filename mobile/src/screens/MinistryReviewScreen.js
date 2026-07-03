@@ -10,6 +10,18 @@ import Badge from '../components/Badge';
 import Icon from '../components/Icon';
 import LessonDetailModal from '../components/LessonDetailModal';
 
+/* Demo/preview identity of the ministry official this review code was
+   issued to, and the school it lets them inspect — REVIEW_CODE (WAS-HID-…)
+   is scoped to Dugsiga Hidaayada, so this mirrors that. Phase 3: comes from
+   the school's ministry-code record, not a constant. */
+const INSPECTOR = {
+  name: 'Ismaaciil Xasan Cige',
+  role: 'Kormeeraha Waxbarashada',
+  city: 'Hargeysa',
+  school: 'Dugsiga Hidaayada',
+  schoolCity: 'Gabiley',
+};
+
 /* Ministry (Wasaarad) review portal — reached from the landing page, gated by
    the school's review code. The ministry is NOT a logged-in user: with a valid
    code they get a READ-ONLY view of every APPROVED lesson and can leave
@@ -93,6 +105,23 @@ export default function MinistryReviewScreen({ onBack }) {
                 <Text style={[styles.gateFootTxt, { color: c.muted2 }]}>Daawasho keliya — xogtu waa la ilaaliyaa</Text>
               </View>
             </View>
+
+            {/* ---- who this code belongs to, and which school it covers ---- */}
+            <View style={[styles.inspectorCard, { backgroundColor: c.surface, borderColor: c.line }]}>
+              <Avatar name={INSPECTOR.name} code="MW" size={38} />
+              <View style={{ flex: 1, marginLeft: 12 }}>
+                <Text style={[styles.inspectorName, { color: c.ink }]}>{INSPECTOR.name}</Text>
+                <Text style={[styles.inspectorMeta, { color: c.muted }]}>{INSPECTOR.role} · {INSPECTOR.city}</Text>
+              </View>
+            </View>
+            <View style={styles.inspectorSchoolRow}>
+              <Icon name="students" size={13} color={c.muted2} />
+              <Text style={[styles.inspectorSchoolTxt, { color: c.muted2 }]}>
+                Dugsiga la kormeerayo: <Text style={{ fontWeight: '800', color: c.muted }}>{INSPECTOR.school} · {INSPECTOR.schoolCity}</Text>
+              </Text>
+            </View>
+
+            <Text style={[styles.poweredBy, { color: c.muted2 }]}>Powered by Kobciye</Text>
           </View>
         </ScrollView>
       </SafeAreaView>
@@ -181,6 +210,19 @@ const styles = StyleSheet.create({
   gateBtnTxt: { color: '#fff', fontSize: 15, fontWeight: '800' },
   gateFootRow: { flexDirection: 'row', alignItems: 'center', gap: 6, marginTop: 18, paddingTop: 14, borderTopWidth: 1, width: '100%', justifyContent: 'center' },
   gateFootTxt: { fontSize: 11.5, fontWeight: '600' },
+
+  inspectorCard: {
+    flexDirection: 'row', alignItems: 'center', borderWidth: 1, borderRadius: 16,
+    padding: 14, maxWidth: 420, width: '100%', alignSelf: 'center', marginTop: 16,
+  },
+  inspectorName: { fontSize: 14.5, fontWeight: '800' },
+  inspectorMeta: { fontSize: 12, fontWeight: '600', marginTop: 2 },
+  inspectorSchoolRow: {
+    flexDirection: 'row', alignItems: 'center', gap: 6, justifyContent: 'center',
+    maxWidth: 420, width: '100%', alignSelf: 'center', marginTop: 10, paddingHorizontal: 8,
+  },
+  inspectorSchoolTxt: { fontSize: 12, fontWeight: '600' },
+  poweredBy: { fontSize: 11.5, fontWeight: '700', textAlign: 'center', marginTop: 22, letterSpacing: 0.3 },
   header: { flexDirection: 'row', alignItems: 'center', padding: 16, borderBottomWidth: 1 },
   iconBtn: { width: 36, height: 36, borderRadius: 10, borderWidth: 1, alignItems: 'center', justifyContent: 'center' },
   hTitle: { fontSize: 17, fontWeight: '800' },

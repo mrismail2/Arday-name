@@ -12,7 +12,9 @@ supabase/
     ├── 20260702000001_initial_schema.sql      # tables, enums, triggers, id generator
     ├── 20260702000002_rls_policies.sql        # amniga door kasta (RLS)
     ├── 20260702000003_storage.sql             # buckets: school-logos, student-photos
-    └── 20260702000004_seed.sql                # 2 dugsi, maadooyinka, terms, grading
+    ├── 20260702000004_seed.sql                # 2 dugsi, maadooyinka, terms, grading
+    ├── 20260702000005_saas_foundation.sql     # academic_years, school_members, subscriptions, audit_logs, parents, staff
+    └── 20260702000006_security_hardening.sql  # privilege-escalation fixes, cross-school guards
 ```
 
 ## 1. Samee Supabase project
@@ -29,11 +31,11 @@ supabase/
 npm i -g supabase             # hal mar
 supabase login
 supabase link --project-ref <PROJECT-REF>   # ref-ka URL-kaaga
-supabase db push              # waxay ku shubtaa 4-ta migration isku xigxiga
+supabase db push              # waxay ku shubtaa migrations-ka isku xigxiga
 ```
 
 **Ama CLI la'aan:** Dashboard → **SQL Editor** → migration kasta koobi geli
-oo socodsii isku xigxiga (0001 → 0002 → 0003 → 0004).
+oo socodsii isku xigxiga (0001 → 0002 → 0003 → 0004 → 0005 → 0006).
 
 ## 3. Environment setup (mobile app)
 
@@ -70,25 +72,59 @@ isticmaalaa keydka local-ka ah (prototype), marka `.env` la buuxiyo
 
 **Otomaatig:**
 - Arday cusub oo aan `student_id` lahayn → trigger ayaa siiya ID-ga xiga
-  ee dugsigiisa (`HID-000142` …) isaga oo sequence-ka si ammaan ah u kordhinaya.
-- Auth signup kasta → row `profiles` ah ayaa toos loogu abuuraa
-  (`full_name` iyo `role` waxaa laga akhriyaa user metadata).
+  ee dugsigiisa (`HID-001`, `HID-002` …) isaga oo sequence-ka si ammaan ah
+  u kordhinaya (row lock — labo arday isku ID ma heli karaan).
+- Auth signup kasta → row `profiles` ah ayaa toos loogu abuuraa, **`role`
+  waxay had iyo jeer noqotaa `'pending'`** (`school_id = null`). `role`
+  iyo `school_id`-ga signup metadata-ka lagama qaato — caller-ku wuxuu
+  metadata-ka geliyi karaa wax kasta (`{"role":"super_admin"}`), sidaas
+  darteed laguma kalsoonaan karo.
 
-## 5. Amniga (RLS) — sida app-ka oo kale
+## 5. Sida loo helo door dhab ah (privilege escalation-ka waa la xannibay)
+
+`pending` ma arki karto wax — `school_id` ma laha, RLS-na miis kastaba wuxuu
+u baahan yahay `school_id` iyo `role` sax ah. Laba jid oo keliya ayaa jira
+oo lagu heli karo door:
+
+- **`provision_school(name, slug, location)`** — account `pending` ah
+  wuxuu abuuraa dugsi CUSUB oo isaga noqda `school_admin`-kiisa koowaad.
+  Mar keliya ayuu shaqeeyaa (account horey dugsi u lahaa lama oggola), oo
+  weligiis dugsi jira lama qabsan karo — kaliya mid cusub.
+- **`assign_role(profile_id, role, school_id)`** — `school_admin` (dugsigiisa
+  gudihiisa) ama `super_admin` ayaa siin kara qof kale door. `super_admin`
+  kaliya ayaa siin kara door `super_admin` ah. Wicitaan kastaa waxaa lagu
+  qoraa `audit_logs`.
+
+RLS oo keliya kuma filna profiles — user-ku wuxuu weli UPDATE gareyn karaa
+saf-kiisa (`id = auth.uid()`), taasoo aan xaddidin CONTENT-ka (role/school_id
+badalka). Trigger `guard_profile_privileged_fields()` ayaa xaddida taas:
+qof aan admin ahayn wuu badali karaa `full_name`/`phone`/`avatar_url`
+kaliya — `role`/`school_id` isbadalkoodu wuxuu keliya u ogolyahay
+`assign_role()`/`provision_school()` (ama session aan JWT lahayn — SQL
+Editor-ka, marka la bilaabayo `super_admin`-ka ugu horreeya).
+
+## 6. Amniga (RLS) — sida app-ka oo kale
 
 Doorka wuxuu ka imanayaa login-ka (landing): **Dugsiga** (maamule &
-macalin), **Waalid**, **Arday**.
+macalin), **Waalid**, **Arday** — laakiin door dhab ah ma jiro ilaa
+`assign_role()`/`provision_school()` la wado (Phase 3).
 
 | Door | Waxa uu arki/qori karaa |
 |---|---|
-| `superadmin` | wax walba |
-| `schooladmin` | wax walba dugsigiisa gudihiisa |
+| `super_admin` | wax walba |
+| `school_admin` | wax walba dugsigiisa gudihiisa |
 | `teacher` | xogta dugsiga; wuxuu qoraa xaadiris, imtixaanno, natiijooyin, kiisas |
 | `accountant` | maaliyadda dugsigiisa |
 | `parent` | kaliya xogta caruurtiisa (natiijooyin la daabacay, xaadiris, lacago) |
 | `student` | kaliya xogtiisa |
+| `pending` | midna — sugaya in loo dhiibo door |
 
-## 6. Storage
+**Cross-school guards:** trigger kasta oo ku xiraya laba xog (macalin↔fasal,
+macalin↔maado, fasal↔maado, arday↔fasal, imtixaan↔fasal/maado/macalin,
+natiijo↔imtixaan/arday, xaadiris↔fasal/arday, waalid↔arday) wuu xaqiijiyaa
+in labaduba isku dugsi (`school_id`) ka yihiin — haddii kale wuu diidaa.
+
+## 7. Storage
 
 | Bucket | Access | Path |
 |---|---|---|
@@ -97,7 +133,7 @@ macalin), **Waalid**, **Arday**.
 
 Helpers: `schoolLogoUrl()` iyo `studentPhotoUrl()` — `mobile/src/services/supabase.js`.
 
-## 7. Local development (ikhtiyaari)
+## 8. Local development (ikhtiyaari)
 
 ```bash
 supabase start        # Docker ku socodsii Postgres + Auth + Storage local ahaan

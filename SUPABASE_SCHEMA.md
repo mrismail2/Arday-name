@@ -29,7 +29,7 @@ status fields where useful.
 
 | Table | Purpose |
 |-------|---------|
-| `students` | Core student record. `student_id` is the public display ID (`HID-000001`) generated per school by the `next_student_id()` function + trigger — no duplicates possible (unique `(school_id, student_id)` and a row-locked counter). |
+| `students` | Core student record. `student_id` is the public display ID (`HID-001`) generated per school by the `next_student_id()` function + trigger — no duplicates possible (unique `(school_id, student_id)` and a row-locked counter). |
 | `parents` | Parent directory per school; `profile_id` links to a login once the parent has one. |
 | `student_parents` | Parent ↔ child links (by parent login and/or directory row). Drives everything a parent may see. |
 | `teachers` | Teacher directory; `teacher_classes` / `teacher_subjects` record assignments — the basis for Phase 3 “teachers only touch their own classes/subjects” rules. |
@@ -46,20 +46,60 @@ them without schema rework. Files/photos live in the two storage buckets.
 
 ## Roles
 
-Role values match the app's internal codes 1:1 (no mapping layer):
+| DB value (`user_role` enum) | App key (`mobile/src/data/roles.js`) | App label | Scope |
+|---|---|---|---|
+| `super_admin` | `superadmin` | Super Admin | Platform owner — manages all schools |
+| `school_admin` | `schooladmin` | Maamulaha Dugsiga | Everything inside their school |
+| `teacher` | `teacher` | Macalin | School data; writes attendance/exams/results/incidents |
+| `accountant` | `accountant` | Xisaabiye | Finance inside the school |
+| `parent` | `parent` | Waalid | Only rows about their linked children |
+| `student` | `student` | Arday | Only rows about themselves |
+| `pending` | *(none yet)* | — | No school, no access — the only role a public signup can ever receive |
 
-| DB value | App label | Scope |
-|----------|-----------|-------|
-| `superadmin` | Super Admin | Platform owner — manages all schools |
-| `schooladmin` | Maamulaha Dugsiga | Everything inside their school |
-| `teacher` | Macalin | School data; writes attendance/exams/results/incidents |
-| `accountant` | Xisaabiye | Finance inside the school |
-| `parent` | Waalid | Only rows about their linked children |
-| `student` | Arday | Only rows about themselves |
+The DB enum uses `super_admin`/`school_admin` (snake_case, matching the
+spec); the frontend's preview-only role keys are `superadmin`/`schooladmin`
+(no underscore, unchanged from Phase 1 to avoid touching the UI). Phase 3's
+auth wiring is where these two get mapped — do it in one place (e.g. a
+`DB_ROLE_TO_APP_ROLE` table next to `dataProvider.js`), not scattered across
+screens.
 
 Role data lives in the database (`profiles.role`, `school_members.role`) and
 is enforced by RLS — the mobile app's role state is presentation only and is
-never trusted by the backend.
+never trusted by the backend. **A role can only ever change through
+`provision_school()` or `assign_role()`** (see "Privilege escalation
+defenses" below) — nothing else, including the user themself, may write
+`profiles.role` or `profiles.school_id`.
+
+## Privilege escalation defenses (Phase 2 security hardening)
+
+Three independent layers, each closing a different hole:
+
+1. **`handle_new_user()`** (signup trigger) never reads `role` or
+   `school_id` from `raw_user_meta_data` — that field is client-supplied and
+   trivially forgeable (`{"role":"super_admin"}`). Every signup becomes
+   `role = 'pending'`, `school_id = null`, full stop.
+2. **`guard_profile_privileged_fields()`** (BEFORE UPDATE trigger on
+   `profiles`) — RLS's `"update own profile"` policy lets a user UPDATE
+   their own row, but RLS only filters *rows*, not *columns*; without this
+   trigger a user could still `UPDATE profiles SET role = 'super_admin'
+   WHERE id = auth.uid()`. The trigger inspects the column-level diff and
+   rejects any change to `role`/`school_id` unless the caller is already a
+   `school_admin` of the relevant school or a `super_admin` — RLS
+   structurally cannot express that check.
+3. **`provision_school()`** / **`assign_role()`** — the only two
+   `security definer` RPCs allowed to move a profile out of `pending`.
+   Every call is written to `audit_logs`. `school_members`, `subscriptions`
+   and other privileged tables have no self-service write policy at all
+   (default-deny — a normal user simply has no INSERT/UPDATE grant on them).
+
+## Cross-school data integrity
+
+Every relationship/join table has a `BEFORE INSERT OR UPDATE` guard trigger
+that re-checks the `school_id` of both sides and rejects the write if they
+differ — independent of RLS, so it holds even for a school admin acting on
+their own school's data or a bug in a future admin screen:
+`class_subjects`, `teacher_classes`, `teacher_subjects`, `students.class_id`,
+`exam_windows`, `exams`, `results`, `attendance`, `student_parents`.
 
 ## Row Level Security (how it works)
 
@@ -69,7 +109,7 @@ are built from four `security definer` helper functions:
 - `my_role()` / `my_school()` — the caller's role and school from `profiles`
 - `is_staff_of(school)` — admins/teachers/accountants of that school (staff
   enter together through the school section, mirroring the login)
-- `is_admin_of(school)` — school admin of that school, or superadmin
+- `is_admin_of(school)` — school admin of that school, or super_admin
 - `is_parent_of(student)` / `is_self_student(student)` — parent-link / self checks
 
 Pattern per table: school members **read** school-scoped rows; the owning
@@ -84,9 +124,9 @@ checks to files.
 
 ## ID generation
 
-`students.student_id` display IDs (e.g. `HID-000001`) are produced by
+`students.student_id` display IDs (e.g. `HID-001`) are produced by
 `next_student_id(school_id)`: it locks the school row, increments
-`next_student_sequence`, and formats `prefix || '-' || lpad(seq, 6, '0')`.
+`next_student_sequence`, and formats `prefix || '-' || lpad(seq, 3, '0')`.
 Per-school, gap-free enough, duplicate-proof under concurrency, and the
 prefix is configurable per school (`HID`, `NUR`, …) to match the app's
 Settings screen.

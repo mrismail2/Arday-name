@@ -131,13 +131,13 @@ create table staff (
   school_id uuid not null references schools (id) on delete cascade,
   profile_id uuid references profiles (id) on delete set null,
   full_name text not null,
-  role user_role not null default 'schooladmin',   -- schooladmin | accountant
+  role user_role not null default 'school_admin',   -- school_admin | accountant
   phone text,
   status record_status not null default 'active',
   permissions text[] not null default '{}',
   created_at timestamptz not null default now(),
   updated_at timestamptz not null default now(),
-  check (role in ('schooladmin', 'accountant'))
+  check (role in ('school_admin', 'accountant'))
 );
 comment on table staff is 'Admins & accountants per school; mirrors teachers for non-teaching roles.';
 create index staff_school on staff (school_id);
@@ -161,7 +161,7 @@ alter table staff          enable row level security;
 
 -- academic_years: anyone in the school can read the calendar; only admins shape it
 create policy "school members read years" on academic_years for select
-  using (school_id = my_school() or my_role() = 'superadmin');
+  using (school_id = my_school() or my_role() = 'super_admin');
 create policy "admins manage years" on academic_years for all
   using (is_admin_of(school_id));
 
@@ -175,19 +175,19 @@ create policy "admins manage memberships" on school_members for all
   using (is_admin_of(school_id));
 
 -- subscriptions: billing state is admin/accountant business inside the school;
--- superadmin manages all plans from the platform side
+-- super_admin manages all plans from the platform side
 create policy "school staff read subscription" on subscriptions for select
-  using (is_staff_of(school_id) and my_role() in ('superadmin', 'schooladmin', 'accountant'));
-create policy "superadmin manages subscriptions" on subscriptions for all
-  using (my_role() = 'superadmin');
+  using (is_staff_of(school_id) and my_role() in ('super_admin', 'school_admin', 'accountant'));
+create policy "super_admin manages subscriptions" on subscriptions for all
+  using (my_role() = 'super_admin');
 
 -- audit_logs: append-only — inserts must be stamped with the caller's id and
 -- school; admins read their school's trail; nobody updates or deletes
 create policy "school writes own audit rows" on audit_logs for insert
   with check (actor_id = auth.uid()
-              and (school_id = my_school() or my_role() = 'superadmin'));
+              and (school_id = my_school() or my_role() = 'super_admin'));
 create policy "admins read school audit" on audit_logs for select
-  using (is_admin_of(school_id) or my_role() = 'superadmin');
+  using (is_admin_of(school_id) or my_role() = 'super_admin');
 
 -- parents directory: staff manage/read inside the school; a parent with a
 -- login can read their own directory row

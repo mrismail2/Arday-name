@@ -51,7 +51,7 @@ supabase db push                                 # applies supabase/migrations/*
 ```
 
 Without the CLI: open **SQL Editor** in the dashboard and paste each file in
-`supabase/migrations/` **in filename order** (0001 → 0005), running each one.
+`supabase/migrations/` **in filename order** (0001 → 0006), running each one.
 
 The migrations are:
 
@@ -62,6 +62,31 @@ The migrations are:
 | 3 | `20260702000003_storage.sql` | `school-logos` + `student-photos` buckets and policies |
 | 4 | `20260702000004_seed.sql` | Two demo schools, subjects, terms, grading rules |
 | 5 | `20260702000005_saas_foundation.sql` | academic_years, school_members, subscriptions, audit_logs, parents, staff |
+| 6 | `20260702000006_security_hardening.sql` | Blocks self-privilege-escalation on `profiles`; adds `provision_school()` / `assign_role()`; cross-school relationship guards |
+
+## 3b. How anyone gets a real role (read this before inviting users)
+
+Every signup lands as `role = 'pending'` with no `school_id` — a signup can
+**never** choose its own role or school, even by tampering with the client.
+There are exactly two sanctioned ways to become something else:
+
+- **`select provision_school('My School', 'my-school-slug');`** (called by
+  the signed-in user) — creates a brand-new school and makes the caller its
+  first `school_admin`. Works once per account; can never attach to an
+  *existing* school.
+- **`select assign_role('<profile-id>', 'teacher', '<school-id>');`** —
+  called by an existing `school_admin` (for their own school) or
+  `super_admin`. Only a `super_admin` may grant `super_admin`.
+
+To bootstrap your own first `super_admin` (there is no user yet who can
+grant it), run this once in the SQL Editor as the project owner:
+
+```sql
+update profiles set role = 'super_admin' where id = '<your-auth-user-id>';
+```
+
+(This works from the SQL Editor because it runs without a client JWT; the
+same statement is rejected if attempted through the app.)
 
 ## 4. Enable email/password authentication
 
@@ -87,12 +112,12 @@ Migration 0003 already created the buckets — verify under **Storage**:
 
 - [ ] Project created, database password saved
 - [ ] `mobile/.env` filled from Settings → API
-- [ ] Migrations 0001–0005 applied (CLI `supabase db push` or SQL Editor)
+- [ ] Migrations 0001–0006 applied (CLI `supabase db push` or SQL Editor)
 - [ ] Email provider enabled; confirm-email set the way you want
 - [ ] Redirect URLs added (`kobciye://reset`, dev URLs)
 - [ ] Buckets `school-logos` and `student-photos` visible under Storage
 - [ ] (Optional) Invite your own admin user under Authentication → Users,
-      then set their row in `profiles` to `role = 'schooladmin'` and the
+      then set their row in `profiles` to `role = 'school_admin'` and the
       right `school_id`
 
 ## 7. What this does NOT change yet

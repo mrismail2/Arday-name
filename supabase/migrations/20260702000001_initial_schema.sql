@@ -8,7 +8,10 @@
 create extension if not exists "pgcrypto";
 
 -- ---------- enums ----------
-create type user_role as enum ('superadmin', 'schooladmin', 'teacher', 'accountant', 'parent', 'student');
+-- 'pending' is the only role a public signup may ever receive (see
+-- handle_new_user() below) — it has no school_id and no RLS policy grants
+-- it access to anything until an admin assigns a real role.
+create type user_role as enum ('super_admin', 'school_admin', 'teacher', 'accountant', 'parent', 'student', 'pending');
 create type student_status as enum ('active', 'left', 'transferred', 'graduated', 'inactive', 'suspended_not_billed');
 create type fee_status as enum ('full', 'half', 'free');
 create type record_status as enum ('active', 'archived');
@@ -27,8 +30,8 @@ create table schools (
   status record_status not null default 'active',
   logo_url text,
   location text,
-  -- per-school student id generation (HID-000142 …)
-  student_id_prefix text not null default 'KOB',
+  -- per-school student id generation (HID-001, HID-002 …)
+  student_id_prefix text not null default 'HID',
   next_student_sequence integer not null default 1,
   created_at timestamptz not null default now(),
   updated_at timestamptz not null default now()
@@ -38,7 +41,7 @@ create table schools (
 create table profiles (
   id uuid primary key references auth.users (id) on delete cascade,
   school_id uuid references schools (id) on delete set null,
-  role user_role not null default 'student',
+  role user_role not null default 'pending',
   full_name text not null default '',
   phone text,
   avatar_url text,
@@ -103,7 +106,7 @@ create table students (
   school_id uuid not null references schools (id) on delete cascade,
   class_id uuid references classes (id) on delete set null,
   profile_id uuid references profiles (id) on delete set null, -- student login
-  student_id text not null,    -- public id: HID-000142 …
+  student_id text not null,    -- public id: HID-001, HID-002 …
   full_name text not null,
   gender text,
   status student_status not null default 'active',
@@ -286,8 +289,11 @@ create trigger schools_updated_at  before update on schools  for each row execut
 create trigger profiles_updated_at before update on profiles for each row execute function set_updated_at();
 create trigger students_updated_at before update on students for each row execute function set_updated_at();
 
--- ---------- per-school student id generator (HID-000142 …) ----------
+-- ---------- per-school student id generator (HID-001, HID-002 …) ----------
 -- Atomically consumes the school's sequence and stamps the public id.
+-- The UPDATE takes a row lock on the school for the duration of the
+-- transaction, so concurrent inserts for the same school are serialized —
+-- no two students can ever be minted the same sequence number.
 create or replace function next_student_id(p_school uuid)
 returns text language plpgsql security definer set search_path = public as $$
 declare
@@ -301,7 +307,7 @@ begin
   if v_prefix is null then
     raise exception 'school % not found', p_school;
   end if;
-  return v_prefix || '-' || lpad(v_seq::text, 6, '0');
+  return v_prefix || '-' || lpad(v_seq::text, 3, '0');
 end $$;
 
 create or replace function students_fill_student_id()
@@ -317,14 +323,23 @@ create trigger students_fill_id before insert on students
   for each row execute function students_fill_student_id();
 
 -- ---------- auto-create a profile row on signup ----------
+-- SECURITY: every public signup lands as 'pending' with no school_id, full
+-- stop. raw_user_meta_data is supplied by the CLIENT at signup time — a
+-- caller can put anything in it, including {"role":"super_admin"}. It must
+-- never be trusted for role or school_id. Only 'full_name' (harmless
+-- display text) is read from it. Turning a 'pending' account into a real
+-- role happens exclusively through provision_school() (self-service: become
+-- admin of a brand-new school) or assign_role() (an existing admin assigns
+-- a role within their own school) — see migration 0006.
 create or replace function handle_new_user()
 returns trigger language plpgsql security definer set search_path = public as $$
 begin
-  insert into public.profiles (id, full_name, role)
+  insert into public.profiles (id, full_name, role, school_id)
   values (
     new.id,
     coalesce(new.raw_user_meta_data ->> 'full_name', ''),
-    coalesce((new.raw_user_meta_data ->> 'role')::user_role, 'student')
+    'pending',
+    null
   )
   on conflict (id) do nothing;
   return new;

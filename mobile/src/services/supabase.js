@@ -36,16 +36,44 @@ function requireClient() {
   return supabase;
 }
 
-/* Create an account. `meta` may carry full_name/role/school_id — the
-   handle_new_user() trigger copies them into profiles on signup. */
+/* Create an account. `meta` may only carry display fields (e.g. full_name) —
+   the handle_new_user() trigger reads full_name but ALWAYS sets
+   role = 'pending' and school_id = null, ignoring anything else in `meta`
+   (never send role/school_id here; the server would ignore them anyway).
+   Use provisionSchool() or wait for an admin to call assignRole() next. */
 export async function signUpWithEmail(email, password, meta = {}) {
   const { data, error } = await requireClient().auth.signUp({
     email,
     password,
-    options: { data: meta },
+    options: { data: { full_name: meta.full_name || '' } },
   });
   if (error) throw error;
   return data;
+}
+
+/* Self-service: a freshly-signed-up ('pending') account creates its own
+   school and becomes that school's first school_admin. Works once per
+   account; cannot attach to an existing school. Returns the new school id. */
+export async function provisionSchool(name, slug, location) {
+  const { data, error } = await requireClient().rpc('provision_school', {
+    p_name: name,
+    p_slug: slug,
+    p_location: location || null,
+  });
+  if (error) throw error;
+  return data;
+}
+
+/* Admin-only: assign a role (and optionally a school) to another profile.
+   The database re-checks the caller is a school_admin of that school or a
+   super_admin — this call cannot itself grant privileges it doesn't have. */
+export async function assignRole(profileId, role, schoolId) {
+  const { error } = await requireClient().rpc('assign_role', {
+    p_profile_id: profileId,
+    p_role: role,
+    p_school_id: schoolId || null,
+  });
+  if (error) throw error;
 }
 
 export async function signInWithEmail(email, password) {
@@ -98,6 +126,22 @@ export async function getMyProfile() {
     .single();
   if (error) return null;
   return data;
+}
+
+/* Update the caller's own SAFE profile fields only. role/school_id are
+   deliberately not accepted here — even if a caller passed them, the
+   database's guard_profile_privileged_fields() trigger rejects the write.
+   Use assignRole() (admin) or provisionSchool() (self-service) for those. */
+export async function updateMyProfile({ full_name, phone, avatar_url } = {}) {
+  const client = requireClient();
+  const { data: { user } } = await client.auth.getUser();
+  if (!user) throw new Error('Not signed in');
+  const patch = {};
+  if (full_name !== undefined) patch.full_name = full_name;
+  if (phone !== undefined) patch.phone = phone;
+  if (avatar_url !== undefined) patch.avatar_url = avatar_url;
+  const { error } = await client.from('profiles').update(patch).eq('id', user.id);
+  if (error) throw error;
 }
 
 /* ---- storage helpers ---- */

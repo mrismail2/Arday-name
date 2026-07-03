@@ -2,8 +2,8 @@
 -- Kobciye — Phase 2: row-level security
 -- Every row is scoped to a school; what you may see/do inside your
 -- school follows your role, mirroring the app:
---   superadmin  — everything
---   schooladmin — everything inside the school (staff enter together)
+--   super_admin  — everything
+--   school_admin — everything inside the school (staff enter together)
 --   teacher     — school data; writes attendance/exams/results/incidents
 --   accountant  — finance inside the school
 --   parent      — only rows about their own linked children
@@ -27,8 +27,8 @@ returns boolean language sql stable security definer set search_path = public as
   select exists (
     select 1 from profiles
     where id = auth.uid()
-      and (role = 'superadmin'
-           or (school_id = p_school and role in ('schooladmin', 'teacher', 'accountant')))
+      and (role = 'super_admin'
+           or (school_id = p_school and role in ('school_admin', 'teacher', 'accountant')))
   );
 $$;
 
@@ -37,7 +37,7 @@ returns boolean language sql stable security definer set search_path = public as
   select exists (
     select 1 from profiles
     where id = auth.uid()
-      and (role = 'superadmin' or (school_id = p_school and role = 'schooladmin'))
+      and (role = 'super_admin' or (school_id = p_school and role = 'school_admin'))
   );
 $$;
 
@@ -83,13 +83,20 @@ alter table grading_rules    enable row level security;
 
 -- ---------- schools ----------
 create policy "members read their school" on schools for select
-  using (id = my_school() or my_role() = 'superadmin');
+  using (id = my_school() or my_role() = 'super_admin');
 create policy "admins update their school" on schools for update
   using (is_admin_of(id));
-create policy "superadmin manages schools" on schools for all
-  using (my_role() = 'superadmin');
+create policy "super_admin manages schools" on schools for all
+  using (my_role() = 'super_admin');
 
 -- ---------- profiles ----------
+-- NOTE: RLS controls which ROWS a policy applies to, not which COLUMNS may
+-- change. "update own profile" below lets a user touch their own row, but on
+-- its own that would let them also rewrite their own role/school_id (an
+-- instant privilege escalation). The guard_profile_privileged_fields()
+-- trigger in migration 0006 is what actually blocks that — it inspects the
+-- column-level diff, which RLS structurally cannot do. Do not remove that
+-- trigger; this policy alone is not sufficient protection.
 create policy "read own profile" on profiles for select
   using (id = auth.uid());
 create policy "staff read school profiles" on profiles for select
@@ -101,28 +108,28 @@ create policy "admins manage school profiles" on profiles for all
 
 -- ---------- school-scoped reference data (read: everyone in school) ----------
 create policy "school members read subjects" on subjects for select
-  using (school_id = my_school() or my_role() = 'superadmin');
+  using (school_id = my_school() or my_role() = 'super_admin');
 create policy "admins manage subjects" on subjects for all
   using (is_admin_of(school_id));
 
 create policy "school members read classes" on classes for select
-  using (school_id = my_school() or my_role() = 'superadmin');
+  using (school_id = my_school() or my_role() = 'super_admin');
 create policy "admins manage classes" on classes for all
   using (is_admin_of(school_id));
 
 create policy "school members read class_subjects" on class_subjects for select
   using (exists (select 1 from classes c where c.id = class_id
-                 and (c.school_id = my_school() or my_role() = 'superadmin')));
+                 and (c.school_id = my_school() or my_role() = 'super_admin')));
 create policy "admins manage class_subjects" on class_subjects for all
   using (exists (select 1 from classes c where c.id = class_id and is_admin_of(c.school_id)));
 
 create policy "school members read terms" on terms for select
-  using (school_id = my_school() or my_role() = 'superadmin');
+  using (school_id = my_school() or my_role() = 'super_admin');
 create policy "admins manage terms" on terms for all
   using (is_admin_of(school_id));
 
 create policy "school members read grading" on grading_rules for select
-  using (school_id = my_school() or my_role() = 'superadmin');
+  using (school_id = my_school() or my_role() = 'super_admin');
 create policy "admins manage grading" on grading_rules for all
   using (is_admin_of(school_id));
 
@@ -166,7 +173,7 @@ create policy "admins manage exam windows" on exam_windows for all
 create policy "staff read exams" on exams for select
   using (is_staff_of(school_id));
 create policy "staff write exams" on exams for all
-  using (is_staff_of(school_id) and my_role() in ('superadmin', 'schooladmin', 'teacher'));
+  using (is_staff_of(school_id) and my_role() in ('super_admin', 'school_admin', 'teacher'));
 create policy "students read published exams" on exams for select
   using (status = 'published' and exists (
     select 1 from students s
@@ -177,7 +184,7 @@ create policy "students read published exams" on exams for select
 create policy "staff read results" on results for select
   using (is_staff_of(school_id));
 create policy "staff write results" on results for all
-  using (is_staff_of(school_id) and my_role() in ('superadmin', 'schooladmin', 'teacher'));
+  using (is_staff_of(school_id) and my_role() in ('super_admin', 'school_admin', 'teacher'));
 create policy "students read own published results" on results for select
   using (published and is_self_student(student_id));
 create policy "parents read children results" on results for select
@@ -187,7 +194,7 @@ create policy "parents read children results" on results for select
 create policy "staff read attendance" on attendance for select
   using (is_staff_of(school_id));
 create policy "staff write attendance" on attendance for all
-  using (is_staff_of(school_id) and my_role() in ('superadmin', 'schooladmin', 'teacher'));
+  using (is_staff_of(school_id) and my_role() in ('super_admin', 'school_admin', 'teacher'));
 create policy "students read own attendance" on attendance for select
   using (is_self_student(student_id));
 create policy "parents read children attendance" on attendance for select
@@ -197,7 +204,7 @@ create policy "parents read children attendance" on attendance for select
 create policy "finance staff read payments" on payments for select
   using (is_staff_of(school_id));
 create policy "finance staff write payments" on payments for all
-  using (is_staff_of(school_id) and my_role() in ('superadmin', 'schooladmin', 'accountant'));
+  using (is_staff_of(school_id) and my_role() in ('super_admin', 'school_admin', 'accountant'));
 create policy "parents read children payments" on payments for select
   using (is_parent_of(student_id));
 create policy "students read own payments" on payments for select
@@ -206,7 +213,7 @@ create policy "students read own payments" on payments for select
 create policy "finance staff read billing" on billing_records for select
   using (is_staff_of(school_id));
 create policy "finance staff write billing" on billing_records for all
-  using (is_staff_of(school_id) and my_role() in ('superadmin', 'schooladmin', 'accountant'));
+  using (is_staff_of(school_id) and my_role() in ('super_admin', 'school_admin', 'accountant'));
 create policy "parents read children billing" on billing_records for select
   using (is_parent_of(student_id));
 
@@ -214,7 +221,7 @@ create policy "parents read children billing" on billing_records for select
 create policy "staff read incidents" on incidents for select
   using (is_staff_of(school_id));
 create policy "staff write incidents" on incidents for all
-  using (is_staff_of(school_id) and my_role() in ('superadmin', 'schooladmin', 'teacher'));
+  using (is_staff_of(school_id) and my_role() in ('super_admin', 'school_admin', 'teacher'));
 create policy "parents read children incidents" on incidents for select
   using (student_id is not null and is_parent_of(student_id));
 
@@ -228,8 +235,8 @@ create policy "recipient marks read" on messages for update
 
 -- ---------- notices ----------
 create policy "school members read notices" on notices for select
-  using ((school_id = my_school() or my_role() = 'superadmin')
+  using ((school_id = my_school() or my_role() = 'super_admin')
          and (audience is null or cardinality(audience) = 0 or my_role() = any (audience)
-              or my_role() in ('superadmin', 'schooladmin')));
+              or my_role() in ('super_admin', 'school_admin')));
 create policy "admins manage notices" on notices for all
   using (is_admin_of(school_id));

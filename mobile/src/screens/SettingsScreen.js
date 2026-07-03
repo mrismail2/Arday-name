@@ -105,7 +105,7 @@ const GROUPS = [
 ];
 
 export default function SettingsScreen({ navigation }) {
-  const { c, isDark, toggle } = useTheme();
+  const { c } = useTheme();
   const { profile } = useRole();
   const [lang, setLang] = useState(0);
   const [showPw, setShowPw] = useState(false);
@@ -233,12 +233,8 @@ export default function SettingsScreen({ navigation }) {
           </View>
         </Card>
 
-        {/* Language & Appearance (all roles) */}
-        <SectionTitle title="Luqadda & Muuqaalka" tone={c.gold} />
-        <Card style={styles.row}>
-          <View style={styles.rowLeft}><Icon name="moon" size={18} color={c.ink2} /><Text style={[styles.rowTxt, { color: c.ink }]}>Habka Madow (Dark)</Text></View>
-          <Switch value={isDark} onValueChange={toggle} trackColor={{ true: c.blue }} />
-        </Card>
+        {/* Language (all roles) — the app is light-only */}
+        <SectionTitle title="Luqadda" tone={c.gold} />
         <Card padded={false} style={{ marginTop: 10 }}>
           {LANGS.map((l, i) => (
             <TouchableOpacity key={l} style={[styles.langRow, { borderTopColor: c.line, borderTopWidth: i === 0 ? 0 : 1 }]} onPress={() => { setLang(i); persist({ lang: i }); }}>

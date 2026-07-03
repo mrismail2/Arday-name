@@ -90,7 +90,7 @@ function EditInfoForm({ c, initial, onCancel, onSave }) {
 
 /* Full student detail — opens when a student row/name is tapped.
    Shows identity header + info grid + guardian contact. */
-export default function StudentProfileModal({ visible, student, className, onClose, onReportCase, cases = [] }) {
+export default function StudentProfileModal({ visible, student, className, onClose, onReportCase, cases = [], readOnly = false }) {
   const { c } = useTheme();
   const { role, profile } = useRole();
   const { data: appData, reload } = useAppData();
@@ -102,9 +102,10 @@ export default function StudentProfileModal({ visible, student, className, onClo
   const sid = student && student.student_internal_id;
   useEffect(() => { setOverrides(null); setEditInfo(false); }, [sid]);
 
-  const canEditPhoto = role === 'superadmin' || role === 'schooladmin';
-  const canEditInfo = role === 'superadmin' || role === 'schooladmin' || role === 'teacher';
-  const canDelete = role === 'superadmin' || role === 'schooladmin';
+  // readOnly (ministry portal): pure viewing — no edit/delete, no exam marks
+  const canEditPhoto = !readOnly && (role === 'superadmin' || role === 'schooladmin');
+  const canEditInfo = !readOnly && (role === 'superadmin' || role === 'schooladmin' || role === 'teacher');
+  const canDelete = !readOnly && (role === 'superadmin' || role === 'schooladmin');
 
   if (!student) return null;
 
@@ -132,7 +133,7 @@ export default function StudentProfileModal({ visible, student, className, onClo
 
   // the REAL exams a teacher entered for this student (per term + auto-combined).
   // Admin/teacher only — parents/students keep the published-results view.
-  const showExams = role === 'superadmin' || role === 'schooladmin' || role === 'teacher';
+  const showExams = !readOnly && (role === 'superadmin' || role === 'schooladmin' || role === 'teacher');
   const examSummary = showExams
     ? summarizeStudentExams(appData.results, appData.terms, appData.subjects, student.student_internal_id)
     : [];

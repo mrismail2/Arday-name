@@ -7,15 +7,37 @@ security (RLS), storage buckets, iyo environment setup.
 
 ```
 supabase/
-├── config.toml                                # supabase CLI project config
-└── migrations/
-    ├── 20260702000001_initial_schema.sql      # tables, enums, triggers, id generator
-    ├── 20260702000002_rls_policies.sql        # amniga door kasta (RLS)
-    ├── 20260702000003_storage.sql             # buckets: school-logos, student-photos
-    ├── 20260702000004_seed.sql                # 2 dugsi, maadooyinka, terms, grading
-    ├── 20260702000005_saas_foundation.sql     # academic_years, school_members, subscriptions, audit_logs, parents, staff
-    └── 20260702000006_security_hardening.sql  # privilege-escalation fixes, cross-school guards
+├── config.toml                                 # supabase CLI project config
+├── migrations/
+│   ├── 20260702000001_initial_schema.sql       # tables, enums, triggers, id generator
+│   ├── 20260702000002_rls_policies.sql         # amniga door kasta (RLS)
+│   ├── 20260702000003_storage.sql              # buckets: school-logos, student-photos
+│   ├── 20260702000004_seed.sql                 # 2 dugsi, maadooyinka, terms, grading
+│   ├── 20260702000005_saas_foundation.sql      # academic_years, school_members, subscriptions, audit_logs, parents, staff
+│   ├── 20260702000006_security_hardening.sql   # privilege-escalation fixes (round 1)
+│   └── 20260702000007_security_hardening_2.sql # round 2: admin bypass saarid, school_members xir, function EXECUTE revoke
+└── tests/
+    ├── security.test.js                        # 36 assertion — eeg "Security tests" hoose
+    └── package.json
 ```
+
+## Security tests
+
+```bash
+cd supabase/tests
+npm install
+npm test
+```
+
+Wuxuu ku shubaa migrations-ka oo dhan Postgres dhab ah (pglite — ma aha
+mock), kadibna wuxuu isku dayaa weerarrada dhabta ah: signup metadata oo
+sheegaya `super_admin`, user isku badalaya `role`/`school_id`-kiisa,
+`school_admin` oo isku dayaya inuu ka gudbo `assign_role()` isaga oo si
+toos ah wax uga qorayo miiska `profiles`, dugsi isku dayaya inuu wax ka
+qoro dugsi kale, iyo `next_student_id()` oo si toos ah loo yeeri isku dayo
+`anon`/`authenticated`. Dhammaan waxay ku socdaan door Postgres
+`authenticated`/`anon` (ma aha superuser) si RLS run ahaan loo tijaabiyo,
+ma aha si ay u soo baxaan si fudud (superuser wuxuu ka gudbaa RLS).
 
 ## 1. Samee Supabase project
 
@@ -35,7 +57,7 @@ supabase db push              # waxay ku shubtaa migrations-ka isku xigxiga
 ```
 
 **Ama CLI la'aan:** Dashboard → **SQL Editor** → migration kasta koobi geli
-oo socodsii isku xigxiga (0001 → 0002 → 0003 → 0004 → 0005 → 0006).
+oo socodsii isku xigxiga (0001 → 0002 → 0003 → 0004 → 0005 → 0006 → 0007).
 
 ## 3. Environment setup (mobile app)
 

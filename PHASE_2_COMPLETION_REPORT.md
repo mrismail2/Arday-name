@@ -1,159 +1,221 @@
 # Phase 2 Completion Report — Supabase Foundation
 
 **Status: Complete** (foundation only, by design — no UI redesign, no fake
-auth, all demo flows preserved).
+auth, all demo flows preserved, no feature modules migrated).
 
-> **Revision note:** an initial version of this report was marked Complete
-> before a security review caught a critical privilege-escalation bug (the
-> signup trigger trusted client-supplied `role`/`school_id`) plus a related
-> hole (RLS let a user rewrite their own `role`/`school_id` via a normal
-> profile UPDATE) and missing cross-school data-integrity checks. Both are
-> fixed below (migration `0006`), re-verified with a dedicated security test
-> suite, and this report has been rewritten to describe the fixed state
-> honestly — see "Security fixes" for exactly what was wrong and what
-> changed.
+> **Revision history:**
+> - *Rev 1* declared Phase 2 complete before a security review caught a
+>   critical bug (signup trusted client-supplied `role`/`school_id`).
+> - *Rev 2* fixed that plus a related self-service `profiles` UPDATE hole
+>   and added cross-school data-integrity triggers — but an **independent**
+>   second review found the fix was incomplete: `SECURITY DEFINER`
+>   functions (notably `next_student_id()`) still had their default
+>   `PUBLIC`/`anon`/`authenticated` `EXECUTE` grant, and the profile guard
+>   trigger had a `school_admin` exception that let an admin bypass
+>   `assign_role()`'s audit trail through a direct table `UPDATE`. It also
+>   noted the round-1 report asserted things (like the RLS test suite)
+>   without committing runnable evidence.
+> - **This revision (Rev 3)** fixes both gaps (migration `0007`), commits
+>   an executable test suite (`supabase/tests/`, 36 assertions, run under
+>   Postgres role `authenticated`/`anon` — not superuser — so RLS is
+>   actually exercised, not bypassed), and reports real command output
+>   below rather than a description of what should happen.
 
-## What was built
+## What was built (cumulative across all 3 revisions)
 
 ### Backend (`supabase/`)
 
 | File | Contents |
 |------|----------|
-| `migrations/20260702000001_initial_schema.sql` | 22 core tables, 9 enums (incl. `pending` role), `updated_at` triggers, per-school `HID-###` student-ID generator, signup trigger (now safe — see below) |
-| `migrations/20260702000002_rls_policies.sql` | RLS enabled on every table; role helper functions; per-role policies with comments |
-| `migrations/20260702000003_storage.sql` | `school-logos` (public read) + `student-photos` (private) buckets with school/role-scoped object policies |
+| `migrations/20260702000001_initial_schema.sql` | 22 core tables, 9 enums (incl. `pending`), `HID-###` student-ID generator, signup trigger |
+| `migrations/20260702000002_rls_policies.sql` | RLS on every table; role helper functions; per-role policies |
+| `migrations/20260702000003_storage.sql` | `school-logos` / `student-photos` buckets + policies |
 | `migrations/20260702000004_seed.sql` | Two demo schools, subjects, terms, grading rules |
-| `migrations/20260702000005_saas_foundation.sql` | `academic_years`, `school_members`, `subscriptions`, `audit_logs`, `parents`, `staff` + their RLS |
-| `migrations/20260702000006_security_hardening.sql` | **New.** Privilege-escalation fixes, `provision_school()`/`assign_role()`, cross-school relationship guards |
+| `migrations/20260702000005_saas_foundation.sql` | `academic_years`, `school_members`, `subscriptions`, `audit_logs`, `parents`, `staff` + RLS |
+| `migrations/20260702000006_security_hardening.sql` | Round 1: signup can't self-grant a role; `provision_school()`/`assign_role()`; cross-school guards |
+| `migrations/20260702000007_security_hardening_2.sql` | **New.** Round 2: removes the `school_admin` bypass from the profile guard; drops `school_members`' write policy entirely; revokes `EXECUTE` on every write-capable `SECURITY DEFINER` function from `public`/`anon`/`authenticated` |
+| `tests/security.test.js`, `tests/package.json` | **New.** 36-assertion executable security test suite (see below) |
 | `config.toml`, `README.md` | CLI config + quick-start (Somali) |
 
-**27 tables total**, all with `school_id` scoping where school-owned, UUID
-PKs, timestamps, status fields, FKs, unique rules and indexes.
+**27 tables**, all `school_id`-scoped where school-owned, UUID PKs,
+timestamps, FKs, unique rules, indexes.
 
-### Mobile app (`mobile/`)
+### Mobile app (`mobile/`) — unchanged this revision
 
-- `@supabase/supabase-js` + `react-native-url-polyfill`; sessions persist via
-  `@react-native-async-storage/async-storage`.
-- `src/services/supabase.js` — client + helpers: `signUpWithEmail` (only
-  sends `full_name`, never role/school_id), `signInWithEmail`, `signOut`,
-  `restoreSession`, `onAuthStateChange`, `resetPassword`, `updatePassword`,
-  `getMyProfile`, `updateMyProfile` (safe fields only), **`provisionSchool`**,
-  **`assignRole`** (new — thin wrappers over the secure RPCs), storage URL
-  helpers, `isSupabaseConfigured`.
-- `src/services/dataProvider.js` — the migration seam for Phase 3.
-- `.env.example` (placeholders only), `.env` git-ignored. No secrets in code;
-  the service-role key is never used in the app.
+No UI or client code changed in this round; `supabase.js` already exposed
+`provisionSchool`/`assignRole`/`updateMyProfile` from the previous revision
+and none of those call signatures changed.
 
-### Documentation
+## Security fixes — round 2 (this revision)
 
-- `SUPABASE_SETUP.md` — setup steps + **new**: how anyone gets a real role,
-  how to bootstrap the first `super_admin`.
-- `SUPABASE_SCHEMA.md` — tables, roles (DB↔app key mapping), **new**:
-  "Privilege escalation defenses" and "Cross-school data integrity" sections.
-- This report.
+### 1. `SECURITY DEFINER` functions were callable by anyone — FIXED
 
-## Security fixes (this revision)
+`next_student_id(uuid)` mutates `schools.next_student_sequence` and is
+`SECURITY DEFINER`, but had never had its default `EXECUTE` grant touched —
+any `anon` or `authenticated` caller could invoke it directly
+(`select next_student_id('<any-school-uuid>')`) to burn through or
+desynchronize a school's ID counter, including a school they have no
+access to. A **Supabase project additionally pre-grants `EXECUTE` on every
+public-schema function to `anon`/`authenticated`** at bootstrap (`ALTER
+DEFAULT PRIVILEGES`), so revoking from `PUBLIC` alone — which is all a
+naive fix would do — is not sufficient; migration `0007` revokes from
+`public`, `anon`, and `authenticated` explicitly for every sensitive
+function, and the test suite reproduces that same default-grant behavior so
+the revokes are proven against a realistic starting state.
 
-### 1. CRITICAL — signup could self-grant `super_admin` — FIXED
+Fixed by:
+- `revoke all on function next_student_id(uuid) from public, anon, authenticated;`
+- Making `students_fill_student_id()` (the trigger that calls it)
+  `SECURITY DEFINER` too, so its internal call to `next_student_id()` runs
+  as the function *owner* (who always has implicit execute on functions
+  they own) rather than the original client role — this is what makes "only
+  reachable through the insert trigger" actually true instead of aspirational.
+- Every other `SECURITY DEFINER` trigger function reviewed and locked down
+  the same way (defense-in-depth — trigger functions can't be invoked
+  directly by clients regardless, but the grant is removed anyway).
+- The 6 read-only RLS helper functions (`my_role`, `my_school`,
+  `is_staff_of`, `is_admin_of`, `is_parent_of`, `is_self_student`)
+  deliberately **kept** `EXECUTE` for `anon`/`authenticated` — they run
+  inside every RLS policy expression as the querying client, so revoking
+  them would break RLS itself, not improve it.
+- `provision_school`/`assign_role` granted to `authenticated` only.
 
-`handle_new_user()` used to do
-`coalesce((raw_user_meta_data ->> 'role')::user_role, 'student')` —
-`raw_user_meta_data` is supplied by the client at signup, so any caller
-could send `{"role":"super_admin"}` and get it. Fixed: the trigger now
-**always** inserts `role = 'pending'`, `school_id = null`, and reads nothing
-but `full_name` from metadata. Verified with a signup that sends
-`{"role":"super_admin","school_id":"..."}` and asserts the resulting profile
-is `pending`/`null`.
+### 2. `school_admin` could bypass `assign_role()` via direct table UPDATE — FIXED
 
-Role/school assignment now only happens through two audited
-`security definer` RPCs:
-- **`provision_school(name, slug, location)`** — a `pending` account creates
-  a brand-new school and becomes its first `school_admin`. Works once per
-  account; can never attach to an *existing* school (verified).
-- **`assign_role(profile_id, role, school_id)`** — an existing `school_admin`
-  (within their own school) or `super_admin` assigns a role. Only
-  `super_admin` may grant `super_admin` (verified both directions).
+Round 1's `guard_profile_privileged_fields()` trigger let
+`role`/`school_id` change if `is_admin_of(old.school_id) or
+is_admin_of(new.school_id)` — meaning a `school_admin` could
+`UPDATE profiles SET role = 'accountant' WHERE id = '<colleague>'` directly
+through the table API and it would succeed, silently skipping
+`assign_role()`'s authorization checks and its `audit_logs` entry.
 
-### 2. CRITICAL — a user could rewrite their own `role`/`school_id` — FIXED
+Fixed by removing that exception entirely. The trigger now has **exactly
+one** way through: a transaction-local flag
+(`kobciye.bypass_profile_guard`) set only inside `provision_school()`/
+`assign_role()` around their own `UPDATE` — both RPCs still do their own
+authorization checks (caller must be `school_admin` of the target school or
+`super_admin`; only `super_admin` may grant `super_admin`) *before* setting
+the flag, so the authorization logic moved from "trigger checks who you
+are" to "the only door in is guarded by the RPC", which is a strictly
+narrower surface. `school_members` also had its `"admins manage
+memberships"` policy dropped outright — it is now 100% system-managed
+(written only by `sync_primary_membership()`, itself gated by the same
+profile-guard trigger), so no client, `school_admin` included, has any
+INSERT/UPDATE/DELETE path to it anymore.
 
-The `"update own profile"` RLS policy (`using (id = auth.uid())`) correctly
-scoped *rows*, but RLS cannot scope *columns* — nothing stopped
-`UPDATE profiles SET role = 'super_admin' WHERE id = auth.uid()` from
-passing that same policy. Fixed with a `BEFORE UPDATE` trigger,
-`guard_profile_privileged_fields()`, that inspects the column-level diff and
-rejects any `role`/`school_id` change unless the caller is already an admin
-of the relevant school (or `super_admin`), with an extra check that only
-`super_admin` may grant `super_admin`. `full_name`/`phone`/`avatar_url`
-remain freely self-editable. Verified: self-escalation blocked; safe-field
-self-update still works; a `school_admin` still cannot self-grant
-`super_admin`.
+## Security tests (new, committed, executable)
 
-`school_members` and `subscriptions` were already default-deny for normal
-users (no self-service write policy exists) — confirmed, no change needed
-there.
+```
+supabase/tests/security.test.js   — the suite
+supabase/tests/package.json       — pin @electric-sql/pglite
+```
 
-### 3. Role values standardized — DONE
+**Run it:**
+```bash
+cd supabase/tests
+npm install
+npm test
+```
 
-Enum renamed `superadmin`/`schooladmin` → `super_admin`/`school_admin`
-(snake_case) everywhere: the enum, every RLS policy/helper function, the
-`staff` role check, migration 0005, and both schema docs. `pending` was
-added as the seventh (default, zero-access) role. The mobile app's internal
-preview-only role *keys* (`superadmin`/`schooladmin`, no underscore) were
-**not** renamed — that would touch 100+ UI call sites for no functional
-gain before Phase 3 exists to consume them. `SUPABASE_SCHEMA.md` now
-documents the DB↔app key mapping explicitly so Phase 3 does it in one place.
+**What it does:** applies migrations `0001`–`0007` to a real, disposable
+Postgres instance (`@electric-sql/pglite` — an actual embedded Postgres
+engine, not a mock or stub), reproduces Supabase's default `anon`/
+`authenticated` grants, then runs every operation **as Postgres role
+`authenticated` or `anon` via `SET ROLE`** — not as the session superuser —
+so Row Level Security is genuinely exercised. (An earlier draft of this
+suite ran everything as superuser, which bypasses RLS entirely and made
+several assertions pass for the wrong reason; that was caught and fixed
+before this report was written — see the row-count-vs-exception handling
+in `writeIsBlocked()` for the specific bug: an UPDATE/DELETE with no
+matching RLS policy affects 0 rows silently, it does not raise.)
 
-### 4. Student IDs — DONE
+**Actual output of the last run** (2026-07-03, this revision):
 
-Default prefix changed `KOB` → `HID`; format changed from 6-digit
-(`HID-000001`) to the requested 3-digit (`HID-001`, `HID-002`, `HID-003`).
-Uniqueness stays scoped per school (`unique (school_id, student_id)` +
-row-locked sequence — verified no duplicates possible under the same
-generator logic, only the padding width changed).
+```
+applied 20260702000001_initial_schema.sql
+applied 20260702000002_rls_policies.sql
+applied 20260702000003_storage.sql
+applied 20260702000004_seed.sql
+applied 20260702000005_saas_foundation.sql
+applied 20260702000006_security_hardening.sql
+applied 20260702000007_security_hardening_2.sql
 
-### 5. Cross-school data integrity — DONE
+PASS signup metadata role=super_admin ignored -> pending, no school
+PASS signup metadata full_name still copied (harmless field)
+PASS signup metadata role=school_admin ignored -> pending
+PASS self UPDATE role=super_admin blocked
+PASS self UPDATE school_id blocked
+PASS self UPDATE of full_name/phone still allowed
+PASS provision_school makes caller school_admin of the NEW school
+PASS provision_school is audited
+PASS provision_school refuses an account that already has a school
+PASS school_admin still cannot self-grant super_admin
+PASS school_admin can assign_role within their own school
+PASS assign_role is audited
+PASS a teacher cannot call assign_role on themself
+PASS school_admin cannot grant super_admin via assign_role
+PASS school_admin cannot change ANOTHER profile.role via direct UPDATE (must use assign_role)
+PASS school_admin cannot change ANOTHER profile.school_id via direct UPDATE
+PASS school_admin cannot INSERT school_members directly
+PASS school_admin cannot UPDATE school_members directly
+PASS school_admin cannot DELETE school_members directly
+PASS school_members was still correctly synced by the system trigger (role=teacher)
+PASS school_admin of A cannot UPDATE school B's row
+PASS school_admin of A cannot assign_role into school B
+PASS school_admin of A cannot INSERT a class into school B (RLS)
+PASS anon role cannot call next_student_id() directly (EXECUTE revoked)
+PASS authenticated role cannot call next_student_id() directly (EXECUTE revoked)
+PASS next_student_id still works internally via the insert trigger (HID-### format)
+PASS RLS helper functions (my_role/my_school/is_admin_of) remain callable by authenticated
+PASS class_subjects rejects a cross-school pair
+PASS class_subjects allows a same-school pair (positive control)
+PASS teacher_classes rejects a cross-school pair
+PASS a student cannot be assigned a class from another school
+PASS results rejects an exam from another school
+PASS attendance rejects a class from another school
+PASS student_parents rejects a parent from another school
+PASS all 27 protected tables exist
+PASS RLS is enabled on every one of them
+PASS user_role enum is the standardized set
 
-`BEFORE INSERT OR UPDATE` guard triggers (independent of RLS — hold even for
-an admin or a future buggy screen) now reject any row that connects records
-from two different schools: `class_subjects`, `teacher_classes`,
-`teacher_subjects`, `students.class_id`, `exam_windows`, `exams`, `results`,
-`attendance`, `student_parents`. Each was tested with both a rejected
-cross-school pair and a positive-control same-school pair.
+All assertions passed.
+```
 
-## Verification performed
+**36/36 assertions pass.** Coverage against the review's required list:
 
-| Check | Result |
-|-------|--------|
-| All 6 migrations executed on real Postgres (pglite) in order | ✅ pass |
-| **Security suite (22 assertions, dedicated script)** | ✅ **all 22 pass** |
-| — signup metadata cannot set role/school_id | ✅ |
-| — self UPDATE of role/school_id blocked; safe fields still work | ✅ |
-| — `provision_school` one-time-only, new-school-only, audited | ✅ |
-| — `assign_role` scoped to caller's own school; super_admin-only grant of super_admin | ✅ |
-| — cross-school rejected for all 7 relationship tables + positive control | ✅ |
-| — `user_role` enum is the standardized 7-value set | ✅ |
-| Student-ID format `HID-###` | ✅ `HID-001` generated |
-| One-current-academic-year rule | ✅ duplicate blocked |
-| `npm run audit:foundation` (project's own QC script) | ✅ PASSED |
-| `npx expo export --platform web` (production build) | ✅ exported |
-| Browser smoke test (landing renders, login → dashboard, 0 JS errors) | ✅ pass |
-| Lint / typecheck / unit tests | not configured in this project (no such scripts) |
+| Required test | Covered by |
+|---|---|
+| signup metadata cannot grant `super_admin`/`school_admin` | assertions 1–3 |
+| normal user cannot change `role`/`school_id` | assertions 4–5 |
+| `school_admin` cannot bypass `assign_role()` via direct `profiles` UPDATE | assertions 15–16 |
+| `school_admin` cannot modify another school | assertions 20–22 |
+| public/anon cannot call `next_student_id()` directly | assertions 23–24 |
+| cross-school relationship inserts rejected | assertions 28–34 |
+| safe profile updates still work | assertion 6 |
+| RLS remains enabled on all protected tables | assertions 35–36 |
+
+## Verification performed (this revision)
+
+| Check | Command | Result |
+|-------|---------|--------|
+| Security test suite | `cd supabase/tests && npm install && npm test` | ✅ **36/36 pass** (output above) |
+| Project audit script | `cd mobile && npm run audit:foundation` | ✅ PASSED — "70 active files scanned — no forbidden tokens"; "11 classes... 112 students... 5 results + 9 exams — all references valid" |
+| Production web build | `cd mobile && npx expo export --platform web` | ✅ Exported (`_expo/static/js/web/AppEntry-*.js`, `index.html`, `favicon.ico`) |
+| Lint / typecheck / unit tests | — | Not configured in this project (no such npm scripts exist) |
 
 ## Manual actions required (Supabase dashboard)
 
-See `SUPABASE_SETUP.md` §3b for bootstrapping the first `super_admin`, and
-§6 for the full checklist (create project, fill `mobile/.env`,
-`supabase db push`, enable Email provider, add redirect URLs).
+Unchanged from the previous revision — see `SUPABASE_SETUP.md` §3a (run the
+security tests yourself), §3b (bootstrapping the first `super_admin`), and
+§6 (full checklist).
 
 ## Left for Phase 3 (intentionally)
 
 1. Real sign-in/sign-up wired to the landing login, using
    `provisionSchool()`/`assignRole()` for onboarding (preview login stays
-   working until then — it is presentation-only, not fake auth).
-2. Module-by-module data migration through `dataProvider.js`
-   (students → attendance → exams/results → finance → messages).
-3. Teacher narrowing to assigned classes/subjects in RLS write policies
-   (the assignment tables already exist and are now cross-school-safe).
+   working until then).
+2. Module-by-module data migration through `dataProvider.js`.
+3. Teacher narrowing to assigned classes/subjects in RLS write policies.
 4. Photo/logo upload through the storage buckets.
-5. Push notifications, file attachments, reports (schema is ready).
+5. Push notifications, file attachments, reports.
 6. DB↔app role-key mapping layer (see `SUPABASE_SCHEMA.md` → Roles).

@@ -70,27 +70,70 @@ never trusted by the backend. **A role can only ever change through
 defenses" below) — nothing else, including the user themself, may write
 `profiles.role` or `profiles.school_id`.
 
-## Privilege escalation defenses (Phase 2 security hardening)
-
-Three independent layers, each closing a different hole:
+## Privilege escalation defenses (Phase 2 security hardening — 2 rounds)
 
 1. **`handle_new_user()`** (signup trigger) never reads `role` or
    `school_id` from `raw_user_meta_data` — that field is client-supplied and
    trivially forgeable (`{"role":"super_admin"}`). Every signup becomes
    `role = 'pending'`, `school_id = null`, full stop.
-2. **`guard_profile_privileged_fields()`** (BEFORE UPDATE trigger on
-   `profiles`) — RLS's `"update own profile"` policy lets a user UPDATE
-   their own row, but RLS only filters *rows*, not *columns*; without this
-   trigger a user could still `UPDATE profiles SET role = 'super_admin'
-   WHERE id = auth.uid()`. The trigger inspects the column-level diff and
-   rejects any change to `role`/`school_id` unless the caller is already a
-   `school_admin` of the relevant school or a `super_admin` — RLS
-   structurally cannot express that check.
-3. **`provision_school()`** / **`assign_role()`** — the only two
-   `security definer` RPCs allowed to move a profile out of `pending`.
-   Every call is written to `audit_logs`. `school_members`, `subscriptions`
-   and other privileged tables have no self-service write policy at all
-   (default-deny — a normal user simply has no INSERT/UPDATE grant on them).
+2. **`guard_profile_privileged_fields()`** (`BEFORE INSERT OR UPDATE` on
+   `profiles`) — RLS's `"update own profile"`/`"admins manage school
+   profiles"` policies scope *rows*, not *columns*; without this trigger a
+   user (or an admin acting on someone else's row through the table API)
+   could still write `role`/`school_id` directly and bypass `assign_role()`
+   entirely, audit trail included. **As of migration `0007` there is
+   exactly one way through this trigger**: a transaction-local flag
+   (`kobciye.bypass_profile_guard`) set only inside `provision_school()`/
+   `assign_role()` immediately around their own `UPDATE`, or a session with
+   no JWT at all (`auth.uid() is null` — the SQL Editor / service role,
+   trusted for bootstrapping the first `super_admin`). There is **no**
+   `is_admin_of()` exception anymore — round 1 had one, and an independent
+   review correctly flagged that a `school_admin` could still use it to set
+   a colleague's role directly, so it was removed.
+3. **`provision_school()`** / **`assign_role()`** — the only two RPCs
+   allowed to move a profile out of `pending`, both audited to
+   `audit_logs`.
+4. **`school_members` has no write policy at all** (migration `0007`
+   dropped `"admins manage memberships"`) — it is 100% system-managed,
+   kept in sync by `sync_primary_membership()` (fires off
+   `profiles.role`/`school_id`, which itself only changes per #2 above). No
+   client, `school_admin` included, can INSERT/UPDATE/DELETE it through the
+   table API. `subscriptions` and other privileged tables were already
+   default-deny for normal users (no self-service write policy) — checked,
+   unchanged.
+5. **Function-level lockdown (migration `0007`)** — every `SECURITY
+   DEFINER` function was individually reviewed:
+   - `next_student_id(uuid)` mutates `schools` and is `SECURITY DEFINER` —
+     `EXECUTE` is revoked from `public`, `anon`, `authenticated`. It is
+     reachable **only** through the students-insert trigger
+     (`students_fill_student_id()`, itself made `SECURITY DEFINER` so its
+     internal call runs as the function owner, not the original caller —
+     otherwise revoking `EXECUTE` would also break normal student
+     creation).
+   - All other trigger functions (`handle_new_user`, the guard triggers,
+     `sync_primary_membership`, the 9 cross-school guards) have `EXECUTE`
+     revoked too, as defense-in-depth/hygiene — Postgres already refuses to
+     invoke a `RETURNS TRIGGER` function via a direct call, and firing a
+     trigger never requires the DML-issuing role to hold `EXECUTE` on it.
+   - The 6 read-only RLS helpers (`my_role`, `my_school`, `is_staff_of`,
+     `is_admin_of`, `is_parent_of`, `is_self_student`) keep `EXECUTE` for
+     `anon`/`authenticated` — they run *inside* every RLS policy
+     expression, evaluated as the querying client's role, so revoking this
+     would break RLS entirely, not make it safer.
+   - `provision_school`/`assign_role` are granted to `authenticated` only
+     (not `anon`, which could never pass their own `auth.uid() is null`
+     check anyway — the grant now matches that reality).
+
+**Why Supabase specifically needs the explicit `anon`/`authenticated`
+revokes, not just `PUBLIC`:** a fresh Supabase project runs `ALTER DEFAULT
+PRIVILEGES ... GRANT EXECUTE ON FUNCTIONS TO anon, authenticated,
+service_role` at bootstrap, so every new function in the `public` schema
+gets `EXECUTE` for those roles **in addition to** the ordinary `PUBLIC`
+grant. Revoking from `PUBLIC` alone leaves `anon`/`authenticated` able to
+call it. Migration `0007`'s revokes name all three explicitly for this
+reason, and `supabase/tests/security.test.js` reproduces that same default
+privilege so the revokes are tested against a realistic starting point, not
+a clean slate that would pass trivially.
 
 ## Cross-school data integrity
 

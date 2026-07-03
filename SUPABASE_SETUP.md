@@ -51,7 +51,7 @@ supabase db push                                 # applies supabase/migrations/*
 ```
 
 Without the CLI: open **SQL Editor** in the dashboard and paste each file in
-`supabase/migrations/` **in filename order** (0001 → 0006), running each one.
+`supabase/migrations/` **in filename order** (0001 → 0007), running each one.
 
 The migrations are:
 
@@ -63,6 +63,25 @@ The migrations are:
 | 4 | `20260702000004_seed.sql` | Two demo schools, subjects, terms, grading rules |
 | 5 | `20260702000005_saas_foundation.sql` | academic_years, school_members, subscriptions, audit_logs, parents, staff |
 | 6 | `20260702000006_security_hardening.sql` | Blocks self-privilege-escalation on `profiles`; adds `provision_school()` / `assign_role()`; cross-school relationship guards |
+| 7 | `20260702000007_security_hardening_2.sql` | Round-2 fixes: removes the `school_admin` bypass in the profile guard, drops `school_members`' write policy, revokes `EXECUTE` on every write-capable `SECURITY DEFINER` function from `public`/`anon`/`authenticated` |
+
+## 3a. Verify the security fixes yourself
+
+```bash
+cd supabase/tests
+npm install
+npm test
+```
+
+This applies every migration to a real disposable Postgres (`@electric-sql/pglite`
+— an actual embedded Postgres, not a mock) and then tries the exact attacks
+a reviewer would: signup metadata claiming `super_admin`, a user rewriting
+their own `role`/`school_id`, a `school_admin` bypassing `assign_role()`
+through a direct table UPDATE, one school reaching into another's data, and
+calling `next_student_id()` directly as `anon`/`authenticated`. 36
+assertions, all run under Postgres role `authenticated`/`anon` (not the
+test's superuser) so Row Level Security is genuinely exercised. See
+`supabase/tests/security.test.js` for the full list.
 
 ## 3b. How anyone gets a real role (read this before inviting users)
 
@@ -112,7 +131,8 @@ Migration 0003 already created the buckets — verify under **Storage**:
 
 - [ ] Project created, database password saved
 - [ ] `mobile/.env` filled from Settings → API
-- [ ] Migrations 0001–0006 applied (CLI `supabase db push` or SQL Editor)
+- [ ] Migrations 0001–0007 applied (CLI `supabase db push` or SQL Editor)
+- [ ] `cd supabase/tests && npm install && npm test` passes locally before you trust any of the above
 - [ ] Email provider enabled; confirm-email set the way you want
 - [ ] Redirect URLs added (`kobciye://reset`, dev URLs)
 - [ ] Buckets `school-logos` and `student-photos` visible under Storage

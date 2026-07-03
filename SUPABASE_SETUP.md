@@ -51,7 +51,7 @@ supabase db push                                 # applies supabase/migrations/*
 ```
 
 Without the CLI: open **SQL Editor** in the dashboard and paste each file in
-`supabase/migrations/` **in filename order** (0001 → 0007), running each one.
+`supabase/migrations/` **in filename order** (0001 → 0008), running each one.
 
 The migrations are:
 
@@ -64,6 +64,7 @@ The migrations are:
 | 5 | `20260702000005_saas_foundation.sql` | academic_years, school_members, subscriptions, audit_logs, parents, staff |
 | 6 | `20260702000006_security_hardening.sql` | Blocks self-privilege-escalation on `profiles`; adds `provision_school()` / `assign_role()`; cross-school relationship guards |
 | 7 | `20260702000007_security_hardening_2.sql` | Round-2 fixes: removes the `school_admin` bypass in the profile guard, drops `school_members`' write policy, revokes `EXECUTE` on every write-capable `SECURITY DEFINER` function from `public`/`anon`/`authenticated` |
+| 8 | `20260702000008_security_hardening_3.sql` | Round-3 fixes: profile guard becomes an allow-list (blocks `created_at`/`updated_at` tampering, not just `role`/`school_id`); disables self-service `provision_school()`; adds `create_school_as_super_admin()` — school creation is now `super_admin`-only |
 
 ## 3a. Verify the security fixes yourself
 
@@ -76,9 +77,10 @@ npm test
 This applies every migration to a real disposable Postgres (`@electric-sql/pglite`
 — an actual embedded Postgres, not a mock) and then tries the exact attacks
 a reviewer would: signup metadata claiming `super_admin`, a user rewriting
-their own `role`/`school_id`, a `school_admin` bypassing `assign_role()`
-through a direct table UPDATE, one school reaching into another's data, and
-calling `next_student_id()` directly as `anon`/`authenticated`. 36
+their own `role`/`school_id`/`created_at`/`updated_at`, a `school_admin`
+bypassing `assign_role()` through a direct table UPDATE, a non-`super_admin`
+trying to create a school, one school reaching into another's data, and
+calling `next_student_id()` directly as `anon`/`authenticated`. 46
 assertions, all run under Postgres role `authenticated`/`anon` (not the
 test's superuser) so Row Level Security is genuinely exercised. See
 `supabase/tests/security.test.js` for the full list.
@@ -89,10 +91,15 @@ Every signup lands as `role = 'pending'` with no `school_id` — a signup can
 **never** choose its own role or school, even by tampering with the client.
 There are exactly two sanctioned ways to become something else:
 
-- **`select provision_school('My School', 'my-school-slug');`** (called by
-  the signed-in user) — creates a brand-new school and makes the caller its
-  first `school_admin`. Works once per account; can never attach to an
-  *existing* school.
+- **`select create_school_as_super_admin('My School', 'my-school-slug', null, '<pending-profile-id>');`**
+  — callable **only** by an account whose `profiles.role` is exactly
+  `super_admin` (checked in the database, never trusted from client input).
+  Creates a brand-new school, its trial subscription, and assigns the named
+  **pending** profile as that school's first `school_admin`. A `pending`
+  account cannot create its own school and cannot self-promote — school
+  creation is not self-service. (`provision_school()` from an earlier
+  revision attempted self-service creation; it is now permanently disabled
+  — `EXECUTE` revoked from every client role — and kept only for history.)
 - **`select assign_role('<profile-id>', 'teacher', '<school-id>');`** —
   called by an existing `school_admin` (for their own school) or
   `super_admin`. Only a `super_admin` may grant `super_admin`.
@@ -131,7 +138,7 @@ Migration 0003 already created the buckets — verify under **Storage**:
 
 - [ ] Project created, database password saved
 - [ ] `mobile/.env` filled from Settings → API
-- [ ] Migrations 0001–0007 applied (CLI `supabase db push` or SQL Editor)
+- [ ] Migrations 0001–0008 applied (CLI `supabase db push` or SQL Editor)
 - [ ] `cd supabase/tests && npm install && npm test` passes locally before you trust any of the above
 - [ ] Email provider enabled; confirm-email set the way you want
 - [ ] Redirect URLs added (`kobciye://reset`, dev URLs)

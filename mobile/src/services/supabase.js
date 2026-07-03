@@ -51,14 +51,32 @@ export async function signUpWithEmail(email, password, meta = {}) {
   return data;
 }
 
-/* Self-service: a freshly-signed-up ('pending') account creates its own
-   school and becomes that school's first school_admin. Works once per
-   account; cannot attach to an existing school. Returns the new school id. */
+/* DISABLED server-side as of migration 0008 — self-service "sign up and
+   become admin of your own new school" is not the product's rule; only a
+   verified super_admin may create a school (see createSchoolAsSuperAdmin
+   below). Calling this now always fails with a permission error; kept only
+   so nothing throws a ReferenceError if something still imports it. */
 export async function provisionSchool(name, slug, location) {
   const { data, error } = await requireClient().rpc('provision_school', {
     p_name: name,
     p_slug: slug,
     p_location: location || null,
+  });
+  if (error) throw error;
+  return data;
+}
+
+/* super_admin-only: create a school and assign a specific PENDING profile
+   as its first school_admin. The database re-checks the caller is really
+   super_admin and the target is really pending with no school — this call
+   cannot itself grant privileges the caller doesn't have. Returns the new
+   school id. */
+export async function createSchoolAsSuperAdmin(name, slug, location, initialAdminProfileId) {
+  const { data, error } = await requireClient().rpc('create_school_as_super_admin', {
+    p_name: name,
+    p_slug: slug,
+    p_location: location || null,
+    p_initial_admin_profile_id: initialAdminProfileId,
   });
   if (error) throw error;
   return data;

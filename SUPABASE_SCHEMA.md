@@ -70,7 +70,7 @@ never trusted by the backend. **A role can only ever change through
 defenses" below) — nothing else, including the user themself, may write
 `profiles.role` or `profiles.school_id`.
 
-## Privilege escalation defenses (Phase 2 security hardening — 2 rounds)
+## Privilege escalation defenses (Phase 2 security hardening — 3 rounds)
 
 1. **`handle_new_user()`** (signup trigger) never reads `role` or
    `school_id` from `raw_user_meta_data` — that field is client-supplied and
@@ -79,20 +79,42 @@ defenses" below) — nothing else, including the user themself, may write
 2. **`guard_profile_privileged_fields()`** (`BEFORE INSERT OR UPDATE` on
    `profiles`) — RLS's `"update own profile"`/`"admins manage school
    profiles"` policies scope *rows*, not *columns*; without this trigger a
-   user (or an admin acting on someone else's row through the table API)
-   could still write `role`/`school_id` directly and bypass `assign_role()`
-   entirely, audit trail included. **As of migration `0007` there is
-   exactly one way through this trigger**: a transaction-local flag
-   (`kobciye.bypass_profile_guard`) set only inside `provision_school()`/
-   `assign_role()` immediately around their own `UPDATE`, or a session with
-   no JWT at all (`auth.uid() is null` — the SQL Editor / service role,
+   user could write any column directly. **As of migration `0008` this is
+   an allow-list, not a deny-list**: only `full_name`, `phone`, `avatar_url`
+   may differ between the old and new row on a direct client `UPDATE` —
+   `id`, `role`, `school_id`, `created_at`, `updated_at`, and any column a
+   future migration adds are all rejected by default, without this trigger
+   needing to be touched again. (Round 1 enumerated `role`/`school_id`
+   specifically and missed `created_at`/`updated_at`; a later review caught
+   that a client could still run `update profiles set created_at =
+   '2000-01-01' where id = auth.uid()` — the allow-list closes that and
+   every similar gap at once.) The only way through is a transaction-local
+   flag (`kobciye.bypass_profile_guard`) set exclusively inside
+   `assign_role()`/`create_school_as_super_admin()` around their own
+   `UPDATE`, or a session with no JWT at all (SQL Editor / service role,
    trusted for bootstrapping the first `super_admin`). There is **no**
-   `is_admin_of()` exception anymore — round 1 had one, and an independent
-   review correctly flagged that a `school_admin` could still use it to set
-   a colleague's role directly, so it was removed.
-3. **`provision_school()`** / **`assign_role()`** — the only two RPCs
-   allowed to move a profile out of `pending`, both audited to
-   `audit_logs`.
+   `is_admin_of()` exception — round 1 had one, an independent review
+   flagged that a `school_admin` could use it to set a colleague's role
+   directly, and it was removed in round 2.
+   `updated_at` is deliberately *included* in the diff, not excluded: the
+   guard trigger (`profiles_guard_privileged`) sorts alphabetically before
+   the automatic-timestamp trigger (`profiles_updated_at`), so it inspects
+   the client's submitted value first — a manual `updated_at` is caught
+   here, and the legitimate automatic bump happens afterward, in a separate
+   trigger, on a statement that already passed this check.
+3. **`create_school_as_super_admin()`** / **`assign_role()`** — the only
+   two RPCs allowed to move a profile out of `pending`, both audited to
+   `audit_logs`. **School creation is `super_admin`-only, not
+   self-service**: as of migration `0008`, `provision_school()` (the
+   original self-service "sign up and become admin of your own school"
+   path) has `EXECUTE` revoked from every client role and is permanently
+   disabled — kept defined only for history. `create_school_as_super_admin
+   (name, slug, location, initial_admin_profile_id)` checks the caller's
+   `profiles.role` is exactly `super_admin` (from the database, never
+   client input) and that the target profile is `pending` with no school,
+   then creates the school, its trial subscription, assigns the target as
+   `school_admin`, and writes the audit entry — matching the product rule
+   that only a verified super_admin provisions schools.
 4. **`school_members` has no write policy at all** (migration `0007`
    dropped `"admins manage memberships"`) — it is 100% system-managed,
    kept in sync by `sync_primary_membership()` (fires off
@@ -120,9 +142,9 @@ defenses" below) — nothing else, including the user themself, may write
      `anon`/`authenticated` — they run *inside* every RLS policy
      expression, evaluated as the querying client's role, so revoking this
      would break RLS entirely, not make it safer.
-   - `provision_school`/`assign_role` are granted to `authenticated` only
-     (not `anon`, which could never pass their own `auth.uid() is null`
-     check anyway — the grant now matches that reality).
+   - `create_school_as_super_admin`/`assign_role` are granted to
+     `authenticated` only (not `anon`, which could never pass their own
+     `auth.uid() is null` check anyway — the grant matches that reality).
 
 **Why Supabase specifically needs the explicit `anon`/`authenticated`
 revokes, not just `PUBLIC`:** a fresh Supabase project runs `ALTER DEFAULT
@@ -130,10 +152,10 @@ PRIVILEGES ... GRANT EXECUTE ON FUNCTIONS TO anon, authenticated,
 service_role` at bootstrap, so every new function in the `public` schema
 gets `EXECUTE` for those roles **in addition to** the ordinary `PUBLIC`
 grant. Revoking from `PUBLIC` alone leaves `anon`/`authenticated` able to
-call it. Migration `0007`'s revokes name all three explicitly for this
-reason, and `supabase/tests/security.test.js` reproduces that same default
-privilege so the revokes are tested against a realistic starting point, not
-a clean slate that would pass trivially.
+call it. Migrations `0007`/`0008`'s revokes name all three explicitly for
+this reason, and `supabase/tests/security.test.js` reproduces that same
+default privilege so the revokes are tested against a realistic starting
+point, not a clean slate that would pass trivially.
 
 ## Cross-school data integrity
 

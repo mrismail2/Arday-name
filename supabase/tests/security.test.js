@@ -6,10 +6,11 @@
    Postgres instance (via @electric-sql/pglite — an in-process Postgres, not
    a mock/stub) and then attacks the exact things the security review
    flagged: privilege escalation via signup metadata, self-service role
-   writes, admin bypass of assign_role(), cross-school data leakage, and
-   direct execution of a SECURITY DEFINER function that should be
-   unreachable. Every assertion is a real SQL statement expected to
-   succeed or fail — nothing here is asserted from documentation.
+   writes, admin bypass of assign_role(), unsanctioned school provisioning,
+   cross-school data leakage, and direct execution of a SECURITY DEFINER
+   function that should be unreachable. Every assertion is a real SQL
+   statement expected to succeed or fail — nothing here is asserted from
+   documentation.
 
    IMPORTANT: all "as a logged-in user" operations run as Postgres role
    `authenticated` (via SET ROLE), exactly like a real Supabase/PostgREST
@@ -18,7 +19,8 @@
    superuser session would make every RLS policy look like it passes even
    when it doesn't. `asService()` drops back to superuser only for the
    handful of things a real client can never do (seeding auth.users, the
-   way Supabase's own auth service does it outside PostgREST).
+   way Supabase's own auth service does it outside PostgREST; bootstrapping
+   the very first super_admin from the SQL Editor).
 
    Run:
      cd supabase/tests
@@ -46,7 +48,7 @@ const ok = (name, cond) => {
   // by default (ALTER DEFAULT PRIVILEGES set at project bootstrap) — we
   // reproduce that here, applied BEFORE the migrations run, so it covers
   // every table/function the migrations go on to create. This means the
-  // revoke statements in migration 0007 are tested against the real
+  // revoke statements in migrations 0007/0008 are tested against the real
   // starting condition, not a clean slate that would pass trivially. ----
   await db.exec(`
     create role anon;
@@ -114,6 +116,9 @@ const ok = (name, cond) => {
       return true;
     }
   };
+  const throws = async (fn) => {
+    try { await fn(); return false; } catch (e) { return true; }
+  };
 
   // ============================================================
   // 1. signup metadata cannot grant super_admin or school_admin
@@ -137,42 +142,92 @@ const ok = (name, cond) => {
   ok('signup metadata role=school_admin ignored -> pending', r.rows[0].role === 'pending');
 
   // ============================================================
-  // 2. a normal (client-role) user cannot change role or school_id
+  // 2. a normal (client-role) user cannot change role, school_id,
+  //    created_at, or updated_at — allow-list, not deny-list
   // ============================================================
   await asClient(u1);
-  let blocked = false;
-  try { await db.exec(`update profiles set role = 'super_admin' where id = '${u1}'`); } catch (e) { blocked = true; }
-  ok('self UPDATE role=super_admin blocked', blocked);
+  ok('self UPDATE role=super_admin blocked',
+    await throws(() => db.exec(`update profiles set role = 'super_admin' where id = '${u1}'`)));
 
-  blocked = false;
-  try { await db.exec(`update profiles set school_id = '22222222-2222-2222-2222-222222222222' where id = '${u1}'`); } catch (e) { blocked = true; }
-  ok('self UPDATE school_id blocked', blocked);
+  ok('self UPDATE school_id blocked',
+    await throws(() => db.exec(`update profiles set school_id = '22222222-2222-2222-2222-222222222222' where id = '${u1}'`)));
+
+  ok('self UPDATE created_at blocked',
+    await throws(() => db.exec(`update profiles set created_at = '2000-01-01' where id = '${u1}'`)));
+
+  ok('self UPDATE updated_at (manual) blocked',
+    await throws(() => db.exec(`update profiles set updated_at = '2000-01-01' where id = '${u1}'`)));
+
+  ok('self UPDATE id blocked',
+    await throws(() => db.exec(`update profiles set id = '99999999-9999-9999-9999-999999999999' where id = '${u1}'`)));
 
   // ============================================================
-  // 7. safe profile updates still work
+  // safe profile updates still work, and updated_at still bumps
+  // automatically (via the separate, untouched profiles_updated_at trigger)
   // ============================================================
+  const before = (await db.query('select updated_at from profiles where id = $1', [u1])).rows[0].updated_at;
+  await new Promise((res) => setTimeout(res, 5));
   await db.exec(`update profiles set full_name = 'Renamed', phone = '+252600000000' where id = '${u1}'`);
-  r = await db.query('select full_name, phone from profiles where id = $1', [u1]);
+  r = await db.query('select full_name, phone, updated_at from profiles where id = $1', [u1]);
   ok('self UPDATE of full_name/phone still allowed', r.rows[0].full_name === 'Renamed' && r.rows[0].phone === '+252600000000');
+  ok('updated_at still auto-bumps on a legitimate update (via the separate trigger)', new Date(r.rows[0].updated_at) > new Date(before));
 
   // ============================================================
-  // provision_school / assign_role plumbing (needed to set up the rest)
+  // 3. school provisioning is super_admin-only now
   // ============================================================
-  const schoolA = (await db.query(`select provision_school('School A', 'school-a', 'Gabiley') as id`)).rows[0].id;
+
+  // the OLD self-service path is fully disabled for every client role
+  ok('pending user cannot call the old self-service provision_school() (EXECUTE revoked)',
+    await throws(() => db.query(`select provision_school('Sneaky School', 'sneaky-school')`)));
+
+  // a non-super_admin cannot create a school at all
+  ok('pending user cannot call create_school_as_super_admin()',
+    await throws(() => db.query(
+      `select create_school_as_super_admin('X', 'x-slug', null, '${u1}')`
+    )));
+
+  // bootstrap the platform's first super_admin the documented way: a
+  // no-JWT session (SQL Editor / service role)
+  await asService();
+  const superId = '77777777-7777-7777-7777-777777777777';
+  await db.query(`insert into auth.users (id, email) values ($1, 'root@x.com')`, [superId]);
+  await db.query(`update profiles set role = 'super_admin' where id = $1`, [superId]);
+
+  // super_admin creates School A and assigns the still-pending u1 as its
+  // first school_admin
+  await asClient(superId);
+  const schoolA = (await db.query(
+    `select create_school_as_super_admin('School A', 'school-a', 'Gabiley', '${u1}') as id`
+  )).rows[0].id;
+
   r = await db.query('select role, school_id from profiles where id = $1', [u1]);
-  ok('provision_school makes caller school_admin of the NEW school', r.rows[0].role === 'school_admin' && r.rows[0].school_id === schoolA);
+  ok('super_admin can securely assign a pending user as the first school_admin', r.rows[0].role === 'school_admin' && r.rows[0].school_id === schoolA);
 
-  const auditRow = await db.query(`select * from audit_logs where action = 'school.provision' and actor_id = $1`, [u1]);
-  ok('provision_school is audited', auditRow.rows.length === 1);
+  r = await db.query('select * from subscriptions where school_id = $1', [schoolA]);
+  ok('create_school_as_super_admin creates a trial subscription', r.rows.length === 1 && r.rows[0].status === 'trialing');
 
-  blocked = false;
-  try { await db.exec(`select provision_school('School A2', 'school-a2')`); } catch (e) { blocked = true; }
-  ok('provision_school refuses an account that already has a school', blocked);
+  r = await db.query(`select * from audit_logs where action = 'school.provision_by_super_admin' and entity_id = $1`, [schoolA]);
+  ok('school creation by super_admin is audited', r.rows.length === 1 && r.rows[0].actor_id === superId);
 
-  blocked = false;
-  try { await db.exec(`update profiles set role = 'super_admin' where id = '${u1}'`); } catch (e) { blocked = true; }
-  ok('school_admin still cannot self-grant super_admin', blocked);
+  r = await db.query('select role from school_members where profile_id = $1 and school_id = $2', [u1, schoolA]);
+  ok('school_members synced automatically for the new school_admin', r.rows[0]?.role === 'school_admin');
 
+  // a school_admin (u1, freshly promoted) cannot create ANOTHER school
+  await asClient(u1);
+  ok('school_admin cannot create a school',
+    await throws(() => db.query(`select create_school_as_super_admin('School A2', 'school-a2', null, '${u1}')`)));
+
+  // super_admin cannot use the function to hand school_admin to a
+  // non-pending / already-assigned profile
+  await asClient(superId);
+  ok('create_school_as_super_admin refuses a non-pending target',
+    await throws(() => db.query(`select create_school_as_super_admin('School A3', 'school-a3', null, '${u1}')`)));
+
+  // ============================================================
+  // school_admin can assign_role within their own school (unchanged from
+  // migrations 0006/0007 — re-verified here on top of the new provisioning
+  // flow)
+  // ============================================================
   await asService();
   const u2 = '33333333-3333-3333-3333-333333333333';
   await db.query(`insert into auth.users (id, email) values ($1, 'teacher@x.com')`, [u2]);
@@ -186,39 +241,31 @@ const ok = (name, cond) => {
   ok('assign_role is audited', assignAudit.rows.length === 1);
 
   await asClient(u2);
-  blocked = false;
-  try { await db.exec(`select assign_role('${u2}', 'school_admin', '${schoolA}')`); } catch (e) { blocked = true; }
-  ok('a teacher cannot call assign_role on themself', blocked);
+  ok('a teacher cannot call assign_role on themself',
+    await throws(() => db.exec(`select assign_role('${u2}', 'school_admin', '${schoolA}')`)));
 
   await asClient(u1);
-  blocked = false;
-  try { await db.exec(`select assign_role('${u2}', 'super_admin', '${schoolA}')`); } catch (e) { blocked = true; }
-  ok('school_admin cannot grant super_admin via assign_role', blocked);
+  ok('school_admin cannot grant super_admin via assign_role',
+    await throws(() => db.exec(`select assign_role('${u2}', 'super_admin', '${schoolA}')`)));
 
   // ============================================================
-  // 3. school_admin cannot bypass assign_role through a direct profiles UPDATE
+  // school_admin cannot bypass assign_role through a direct profiles UPDATE
   // ============================================================
+  await asClient(u1); // u1 is school_admin of schoolA
+  ok('school_admin cannot change ANOTHER profile.role via direct UPDATE (must use assign_role)',
+    await throws(() => db.exec(`update profiles set role = 'accountant' where id = '${u2}'`)));
+
   await asService();
   const u3 = '44444444-4444-4444-4444-444444444444';
   await db.query(`insert into auth.users (id, email) values ($1, 'pending3@x.com')`, [u3]);
-  await asClient(u3);
-  const schoolB = (await db.query(`select provision_school('School B', 'school-b') as id`)).rows[0].id;
 
-  await asClient(u1); // u1 is school_admin of schoolA, NOT schoolB
-  blocked = false;
-  try { await db.exec(`update profiles set role = 'accountant' where id = '${u2}'`); } catch (e) { blocked = true; }
-  ok('school_admin cannot change ANOTHER profile.role via direct UPDATE (must use assign_role)', blocked);
-
-  blocked = false;
-  try { await db.exec(`update profiles set school_id = '${schoolB}' where id = '${u2}'`); } catch (e) { blocked = true; }
-  ok('school_admin cannot change ANOTHER profile.school_id via direct UPDATE', blocked);
+  await asClient(u1);
+  ok('school_admin cannot change ANOTHER profile.school_id via direct UPDATE',
+    await throws(() => db.exec(`update profiles set school_id = '${u3}' where id = '${u2}'`)));
 
   // school_members is fully system-managed — no client, admin included, may write it
-  blocked = false;
-  try {
-    await db.exec(`insert into school_members (school_id, profile_id, role) values ('${schoolA}', '${u2}', 'school_admin')`);
-  } catch (e) { blocked = true; }
-  ok('school_admin cannot INSERT school_members directly', blocked);
+  ok('school_admin cannot INSERT school_members directly',
+    await throws(() => db.exec(`insert into school_members (school_id, profile_id, role) values ('${schoolA}', '${u2}', 'school_admin')`)));
 
   ok('school_admin cannot UPDATE school_members directly',
     await writeIsBlocked(`update school_members set role = 'school_admin' where profile_id = '${u2}'`));
@@ -231,32 +278,39 @@ const ok = (name, cond) => {
   ok('school_members was still correctly synced by the system trigger (role=teacher)', r.rows[0]?.role === 'teacher');
 
   // ============================================================
-  // 4. school_admin cannot modify another school
+  // School B, created the same super_admin-verified way, with u3 as its
+  // first school_admin — used for the cross-school tests below
+  // ============================================================
+  await asClient(superId);
+  const schoolB = (await db.query(
+    `select create_school_as_super_admin('School B', 'school-b', null, '${u3}') as id`
+  )).rows[0].id;
+  r = await db.query('select role, school_id from profiles where id = $1', [u3]);
+  ok('School B provisioned the same super_admin-verified way', r.rows[0].role === 'school_admin' && r.rows[0].school_id === schoolB);
+
+  // ============================================================
+  // school_admin cannot modify another school
   // ============================================================
   await asClient(u1); // school_admin of A
   ok("school_admin of A cannot UPDATE school B's row",
     await writeIsBlocked(`update schools set name = 'Hacked' where id = '${schoolB}'`));
 
-  blocked = false;
-  try { await db.exec(`select assign_role('${u3}', 'teacher', '${schoolB}')`); } catch (e) { blocked = true; }
-  ok('school_admin of A cannot assign_role into school B', blocked);
+  ok('school_admin of A cannot assign_role into school B',
+    await throws(() => db.exec(`select assign_role('${u3}', 'teacher', '${schoolB}')`)));
 
-  blocked = false;
-  try { await db.exec(`insert into classes (school_id, name) values ('${schoolB}', 'Intruder Class')`); } catch (e) { blocked = true; }
-  ok('school_admin of A cannot INSERT a class into school B (RLS)', blocked);
+  ok('school_admin of A cannot INSERT a class into school B (RLS)',
+    await throws(() => db.exec(`insert into classes (school_id, name) values ('${schoolB}', 'Intruder Class')`)));
 
   // ============================================================
-  // 5. public/anon cannot call next_student_id directly
+  // public/anon cannot call next_student_id directly
   // ============================================================
   await asAnon();
-  blocked = false;
-  try { await db.query('select next_student_id($1)', [schoolA]); } catch (e) { blocked = true; }
-  ok('anon role cannot call next_student_id() directly (EXECUTE revoked)', blocked);
+  ok('anon role cannot call next_student_id() directly (EXECUTE revoked)',
+    await throws(() => db.query('select next_student_id($1)', [schoolA])));
 
   await asClient(u1);
-  blocked = false;
-  try { await db.query('select next_student_id($1)', [schoolA]); } catch (e) { blocked = true; }
-  ok('authenticated role cannot call next_student_id() directly (EXECUTE revoked)', blocked);
+  ok('authenticated role cannot call next_student_id() directly (EXECUTE revoked)',
+    await throws(() => db.query('select next_student_id($1)', [schoolA])));
 
   // it still works from INSIDE the trigger (i.e. normal student creation)
   const classA = (await db.query(`insert into classes (school_id, name) values ($1, 'Form 1A') returning id`, [schoolA])).rows[0].id;
@@ -271,7 +325,7 @@ const ok = (name, cond) => {
   ok('RLS helper functions (my_role/my_school/is_admin_of) remain callable by authenticated', helpersOk);
 
   // ============================================================
-  // 6. cross-school relationship inserts are rejected
+  // cross-school relationship inserts are rejected
   // ============================================================
   const subjA = (await db.query(`insert into subjects (school_id, name) values ($1, 'Xisaab') returning id`, [schoolA])).rows[0].id;
 
@@ -286,35 +340,26 @@ const ok = (name, cond) => {
   // below (a school_admin would already be blocked by RLS row-scoping
   // before the trigger even runs — these prove the TRIGGER itself, not
   // just RLS, refuses cross-school data).
-  await asService();
-  const superId = '77777777-7777-7777-7777-777777777777';
-  await db.query(`insert into auth.users (id, email) values ($1, 'root@x.com')`, [superId]);
-  await db.query(`update profiles set role = 'super_admin' where id = $1`, [superId]); // bootstrap, as documented
   await asClient(superId);
 
-  blocked = false;
-  try { await db.exec(`insert into class_subjects (class_id, subject_id) values ('${classA}', '${subjB}')`); } catch (e) { blocked = true; }
-  ok('class_subjects rejects a cross-school pair', blocked);
+  ok('class_subjects rejects a cross-school pair',
+    await throws(() => db.exec(`insert into class_subjects (class_id, subject_id) values ('${classA}', '${subjB}')`)));
 
   let notBlocked = true;
   try { await db.exec(`insert into class_subjects (class_id, subject_id) values ('${classA}', '${subjA}')`); } catch (e) { notBlocked = false; }
   ok('class_subjects allows a same-school pair (positive control)', notBlocked);
 
-  blocked = false;
-  try { await db.exec(`insert into teacher_classes (teacher_id, class_id) values ('${teacherB}', '${classA}')`); } catch (e) { blocked = true; }
-  ok('teacher_classes rejects a cross-school pair', blocked);
+  ok('teacher_classes rejects a cross-school pair',
+    await throws(() => db.exec(`insert into teacher_classes (teacher_id, class_id) values ('${teacherB}', '${classA}')`)));
 
-  blocked = false;
-  try { await db.exec(`update students set class_id = '${classA}' where id = '${studentB}'`); } catch (e) { blocked = true; }
-  ok('a student cannot be assigned a class from another school', blocked);
+  ok('a student cannot be assigned a class from another school',
+    await throws(() => db.exec(`update students set class_id = '${classA}' where id = '${studentB}'`)));
 
-  blocked = false;
-  try { await db.exec(`insert into results (school_id, exam_id, student_id, score) values ('${schoolA}', '${examB}', '${studentA}', 80)`); } catch (e) { blocked = true; }
-  ok('results rejects an exam from another school', blocked);
+  ok('results rejects an exam from another school',
+    await throws(() => db.exec(`insert into results (school_id, exam_id, student_id, score) values ('${schoolA}', '${examB}', '${studentA}', 80)`)));
 
-  blocked = false;
-  try { await db.exec(`insert into attendance (school_id, class_id, student_id) values ('${schoolB}', '${classA}', '${studentA}')`); } catch (e) { blocked = true; }
-  ok('attendance rejects a class from another school', blocked);
+  ok('attendance rejects a class from another school',
+    await throws(() => db.exec(`insert into attendance (school_id, class_id, student_id) values ('${schoolB}', '${classA}', '${studentA}')`)));
 
   await asService();
   const uParent = '55555555-5555-5555-5555-555555555555';
@@ -322,12 +367,11 @@ const ok = (name, cond) => {
   await asClient(u3); // school_admin of B assigns a parent within B
   await db.exec(`select assign_role('${uParent}', 'parent', '${schoolB}')`);
   await asClient(superId);
-  blocked = false;
-  try { await db.exec(`insert into student_parents (parent_profile_id, student_id) values ('${uParent}', '${studentA}')`); } catch (e) { blocked = true; }
-  ok('student_parents rejects a parent from another school', blocked);
+  ok('student_parents rejects a parent from another school',
+    await throws(() => db.exec(`insert into student_parents (parent_profile_id, student_id) values ('${uParent}', '${studentA}')`)));
 
   // ============================================================
-  // 8. RLS remains enabled on all protected tables
+  // RLS remains enabled on all protected tables
   // ============================================================
   await asService();
   const expectedTables = [
@@ -357,9 +401,6 @@ const ok = (name, cond) => {
   ok('user_role enum is the standardized set', JSON.stringify(enumVals) === JSON.stringify(['super_admin', 'school_admin', 'teacher', 'accountant', 'parent', 'student', 'pending']));
 
   console.log('');
-  if (failures > 0) {
-    console.log(`${failures} assertion(s) FAILED`);
-    process.exit(1);
-  }
-  console.log('All assertions passed.');
+  console.log(`${failures === 0 ? 'All' : failures} assertion(s) ${failures === 0 ? 'passed.' : 'FAILED'}`);
+  if (failures > 0) process.exit(1);
 })().catch((e) => { console.error('UNCAUGHT', e); process.exit(1); });

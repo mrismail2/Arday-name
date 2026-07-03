@@ -27,7 +27,7 @@ function WebLanding({ onEnter, onMinistry }) {
   return (
     <View style={{ flex: 1, backgroundColor: '#fff', position: 'relative' }}>
       <div style={{ height: '100vh', overflowY: 'auto', overflowX: 'hidden' }}>
-        <KobciyeLanding onEnter={enter} />
+        <KobciyeLanding onEnter={enter} onMinistry={onMinistry} />
       </div>
       {onMinistry ? (
         <TouchableOpacity onPress={onMinistry} style={styles.minFloat} activeOpacity={0.85}>

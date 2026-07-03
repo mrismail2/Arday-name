@@ -1,7 +1,10 @@
 /* AUTO-GENERATED React conversion of landing/index.html (Kobciye landing page).
    Markup, inline styles, copy iyo behaviour-ka waxay yihiin isku mid ah kuwii
    HTML-ka asalka ahaa — waxba lagama beddelin muuqaalka.
-   Regenerate: node scratchpad/convert.js (eeg landing/README.md). */
+   Regenerate: node scratchpad/convert.js (eeg landing/README.md).
+   MANUAL ADDITION (not in landing/index.html): the "Eegista Wasaaradda"
+   link inside the login modal, and the onMinistry prop that drives it —
+   if regenerating from the HTML, re-apply that hunk. */
 /* eslint-disable */
 import React, { useState } from 'react';
 
@@ -10,7 +13,7 @@ const LOGO_WHITE = 'data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAAV8AAABWCAYAAA
 
 const CSS = "html{scroll-behavior:smooth}\nbody{margin:0;font-family:'Plus Jakarta Sans',system-ui,-apple-system,sans-serif;color:#0F1B2D;background:#fff}\n@keyframes ipFloat{0%,100%{transform:translateY(0)}50%{transform:translateY(-12px)}}\n@keyframes ipShadow{0%,100%{transform:scale(1);opacity:.85}50%{transform:scale(.88);opacity:.55}}\n@media(prefers-reduced-motion:reduce){*{animation:none!important}}\n.kob-h0:hover{color:#16A34A}\n.kob-h1:hover{color:#16A34A}\n.kob-h2:hover{color:#16A34A}\n.kob-h3:hover{color:#16A34A}\n.kob-h4:hover{color:#16A34A}\n.kob-h5:hover{border-color:#0A2E6B}\n.kob-h6:hover{background:#13458F}\n.kob-h7:hover{background:#15954C}\n.kob-h8:hover{transform:translateY(-4px);box-shadow:0 18px 40px rgba(11,37,73,.1)}\n.kob-h9:hover{transform:translateY(-4px);box-shadow:0 18px 40px rgba(11,37,73,.1)}\n.kob-h10:hover{transform:translateY(-4px);box-shadow:0 18px 40px rgba(11,37,73,.1)}\n.kob-h11:hover{transform:translateY(-4px);box-shadow:0 18px 40px rgba(11,37,73,.1)}\n.kob-h12:hover{transform:translateY(-4px);box-shadow:0 18px 40px rgba(11,37,73,.1)}\n.kob-h13:hover{transform:translateY(-4px);box-shadow:0 18px 40px rgba(11,37,73,.1)}\n.kob-h14:hover{background:#15954C}\n.kob-h15:hover{box-shadow:0 14px 32px rgba(11,37,73,.1)}\n.kob-h16:hover{box-shadow:0 14px 32px rgba(11,37,73,.1)}\n.kob-h17:hover{background:#DDBB6C}\n.kob-h18:hover{color:#fff}\n.kob-h19:hover{color:#fff}\n.kob-h20:hover{color:#fff}\n.kob-h21:hover{color:#fff}\n.kob-h22:hover{color:#fff}\n.kob-h23:hover{color:#fff}\n.kob-h24:hover{color:#fff}\n.kob-h25:hover{color:#fff}\n.kob-h26:hover{color:#fff}\n.kob-h27:hover{color:#fff}\n.kob-f28:focus{border-color:#0A2E6B}\n.kob-h29:hover{background:#15954C}\n.kob-f30:focus{border-color:#0A2E6B}\n.kob-f31:focus{border-color:#0A2E6B}\n.kob-f32:focus{border-color:#0A2E6B}\n.kob-f33:focus{border-color:#0A2E6B}\n.kob-f34:focus{border-color:#0A2E6B}\n.kob-f35:focus{border-color:#0A2E6B}\n.kob-f36:focus{border-color:#0A2E6B}\n.kob-h37:hover{border-color:#E5484D}\n.kob-h38:hover{border-color:#0A2E6B}\n.kob-f39:focus{border-color:#0A2E6B}\n.kob-h40:hover{background:#13458F}";
 
-export default function KobciyeLanding({ onEnter, showStats = true, showFreeBanner = true }) {
+export default function KobciyeLanding({ onEnter, onMinistry, showStats = true, showFreeBanner = true }) {
   const [modal, setModal] = useState(null);
   const [sent, setSent] = useState(false);
   const [faq, setFaq] = useState(0);
@@ -1316,6 +1319,14 @@ export default function KobciyeLanding({ onEnter, showStats = true, showFreeBann
                     Diiwaan geli
                   </a>
                 </p>
+                {onMinistry ? (
+                  <p style={{ margin: '10px 0 0', textAlign: 'center', fontSize: '13px', color: '#7C8AA0', fontWeight: 600 }}>
+                    Ka shaqeeya Wasaaradda?{' '}
+                    <a onClick={() => { v.closeModal(); onMinistry(); }} style={{ color: '#0A2E6B', fontWeight: 800, cursor: 'pointer' }}>
+                      Eegista Wasaaradda
+                    </a>
+                  </p>
+                ) : null}
               </div>
               </>
             ) : null}

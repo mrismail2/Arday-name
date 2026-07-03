@@ -18,11 +18,60 @@ auth, all demo flows preserved, no feature modules migrated).
 >   account create its own school, when the actual product rule is that
 >   only a verified `super_admin` may create a school and assign its first
 >   `school_admin`.
-> - **This revision (Rev 4)** fixes both (migration `0008`, a new file —
->   `0001`–`0007` were left untouched, exactly as instructed), extends the
->   test suite to 46 assertions, and reports real command output below.
+> - *Rev 4* fixed both (migration `0008`) and extended the test suite to 46
+>   assertions.
+> - **This revision (Rev 5)** made no security/schema/UI changes — the
+>   task was to verify the Expo production web export still works after
+>   all the backend hardening, and to produce a read-only dependency
+>   audit. See "Production export verification" and `DEPENDENCY_AUDIT.md`.
+>   The export already passed on the first run; nothing needed fixing.
 
-## What changed this revision
+## Rev 5: production export verification (no code changes)
+
+**Commands run, in order, exactly as specified:**
+```bash
+cd mobile
+npm install
+npm run audit:foundation
+npx expo export --platform web
+```
+
+**Result: PASS.** The command completed with exit code `0`, printed
+`Exported: dist`, and did not hang — the terminal returned control
+normally (no lingering process to investigate). `dist/index.html` exists,
+along with the bundled JS and every asset:
+
+```
+dist/index.html
+dist/favicon.ico
+dist/metadata.json
+dist/_expo/static/js/web/AppEntry-f87771a589149004c0063c78f6eb3122.js  (1.35 MB)
+dist/assets/assets/kobciye-logo.6d0ee21c40bfad4589e52800b5c3a4c4.png
+dist/assets/assets/kobciye-logo-white.ed3b26ed3f99da66d56c71aaeb272090.png
+dist/assets/node_modules/@react-navigation/elements/lib/module/assets/... (7 icon files)
+```
+
+No bundling error, no missing-module error, no environment-variable error,
+no syntax/import/route/Metro error appeared. Nothing was changed to make
+this pass — the export was already working; this revision only verified
+it and recorded the evidence.
+
+## Rev 5: dependency audit (read-only — see `DEPENDENCY_AUDIT.md`)
+
+`npm audit` (no `--force`, no upgrades applied) found **18 vulnerabilities
+(12 high, 6 moderate, 0 critical)**, all tracing to 6 root advisories:
+`@xmldom/xmldom`, `tar`, `postcss`, `uuid` (all high/moderate, transitive,
+pulled in by the Expo CLI/build tooling — not the shipped app bundle),
+`js-yaml` (moderate, transitive, dev-tooling only — the **one** advisory
+with a safe non-breaking fix via plain `npm audit fix`), and `expo`/
+`expo-asset` (the 2 direct dependencies flagged only because they depend
+on the above). Every other proposed fix is `expo@57.0.1` — a 5-major
+jump from the pinned `expo: ~52.0.0` — which was **not** applied, per the
+task's explicit instruction not to upgrade Expo/major packages
+automatically. Full breakdown, per-package severity/direct-vs-transitive
+table, and the Phase 8 recommendation are in `DEPENDENCY_AUDIT.md`.
+
+## What changed in Rev 4
 
 ### New migration: `20260702000008_security_hardening_3.sql`
 
@@ -160,7 +209,7 @@ All assertion(s) passed.
 
 **46/46 assertions pass.**
 
-## Verification performed (this revision)
+## Verification performed (Rev 4)
 
 | Check | Command | Result |
 |-------|---------|--------|
@@ -169,7 +218,78 @@ All assertion(s) passed.
 | Production web build | `cd mobile && npx expo export --platform web` | ✅ Exported — `_expo/static/js/web/AppEntry-f87771a589149004c0063c78f6eb3122.js (1.35 MB)`, `index.html`, `favicon.ico` |
 | Lint / typecheck / unit tests | — | Not configured in this project (no such npm scripts exist) |
 
-## What was built (cumulative, all 4 revisions)
+## Verification performed (Rev 5 — exact output, all 4 required commands)
+
+**`cd supabase/tests && npm test`**
+```
+applied 20260702000001_initial_schema.sql
+applied 20260702000002_rls_policies.sql
+applied 20260702000003_storage.sql
+applied 20260702000004_seed.sql
+applied 20260702000005_saas_foundation.sql
+applied 20260702000006_security_hardening.sql
+applied 20260702000007_security_hardening_2.sql
+applied 20260702000008_security_hardening_3.sql
+
+[... 46 lines, one per assertion, all "PASS" ...]
+
+All assertion(s) passed.
+```
+Result: **46/46 PASS.**
+
+**`cd mobile && npm run audit:foundation`**
+```
+[A] Static scan — active layer must be free of legacy relationship usage
+  ✓ 70 active files scanned — no forbidden tokens
+
+[B] Structural validation — canonical seed integrity
+  ✓ 11 classes — globally-unique class_id, all have school_id
+  ✓ 112 students — identity fields present, no dup student_id/school, valid class refs
+  ✓ 5 results + 9 exams — all references valid
+
+audit:foundation PASSED — canonical foundation is clean ✓
+```
+Result: **PASSED.**
+
+**`cd mobile && npx expo export --platform web`**
+```
+Starting Metro Bundler
+Web Bundled 389ms node_modules/expo/AppEntry.js (503 modules)
+
+› Assets (13):
+assets/kobciye-logo-white.ed3b26ed3f99da66d56c71aaeb272090.png (12 kB)
+assets/kobciye-logo.6d0ee21c40bfad4589e52800b5c3a4c4.png (29 kB)
+node_modules/@react-navigation/elements/lib/module/assets/... (6 more)
+
+› web bundles (1):
+_expo/static/js/web/AppEntry-f87771a589149004c0063c78f6eb3122.js (1.35 MB)
+
+› Files (3):
+favicon.ico (14.5 kB)
+index.html (1.23 kB)
+metadata.json (49 B)
+
+Exported: dist
+```
+Result: **PASS** — exit code `0`, `dist/index.html` confirmed on disk (see
+"Rev 5: production export verification" above for the full file listing).
+Process exited normally; nothing stayed open.
+
+**`cd mobile && npm audit`**
+```
+18 vulnerabilities (6 moderate, 12 high)
+
+To address issues that do not require attention, run:
+  npm audit fix
+
+To address all issues (including breaking changes), run:
+  npm audit fix --force
+```
+Result: **18 findings (0 critical, 12 high, 6 moderate), all documented in
+`DEPENDENCY_AUDIT.md`.** No fix applied — see that file for the
+per-package breakdown and the Phase 8 recommendation.
+
+## What was built (cumulative, all 5 revisions)
 
 ### Backend (`supabase/`)
 
@@ -185,6 +305,14 @@ All assertion(s) passed.
 | `migrations/20260702000008_security_hardening_3.sql` | **New.** Round 3: allow-list profile guard (blocks `created_at`/`updated_at` too); `create_school_as_super_admin()` replaces self-service provisioning |
 | `tests/security.test.js`, `tests/package.json` | 46-assertion executable security test suite |
 | `config.toml`, `README.md` | CLI config + quick-start (Somali) |
+
+### Root-level (`DEPENDENCY_AUDIT.md` — new, Rev 5)
+
+Read-only `npm audit` report for `mobile/`: 18 vulnerabilities (0
+critical, 12 high, 6 moderate), all traced to 6 root advisories, all but
+one (`js-yaml`) fixable only via a major Expo SDK upgrade (52→57) — none
+applied. Recommends deferring to Phase 8. See that file for the full
+per-package table.
 
 **27 tables**, all `school_id`-scoped where school-owned, UUID PKs,
 timestamps, FKs, unique rules, indexes.

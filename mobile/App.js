@@ -48,10 +48,7 @@ function NavWrapper() {
     return (
       <>
         <StatusBar style={isDark ? 'light' : 'dark'} />
-        <MinistryReviewScreen
-          onBack={() => setMinistry(false)}
-          onEnterSchool={() => { setMinistry(false); setEntered(true); }}
-        />
+        <MinistryReviewScreen onBack={() => setMinistry(false)} />
       </>
     );
   }

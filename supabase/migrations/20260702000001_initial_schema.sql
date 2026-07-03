@@ -115,7 +115,7 @@ create table students (
 );
 
 -- parent ↔ student links (a parent can have several children)
-create table parent_students (
+create table student_parents (
   parent_profile_id uuid not null references profiles (id) on delete cascade,
   student_id uuid not null references students (id) on delete cascade,
   primary key (parent_profile_id, student_id)

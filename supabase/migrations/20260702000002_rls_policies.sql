@@ -45,7 +45,7 @@ $$;
 create or replace function is_parent_of(p_student uuid)
 returns boolean language sql stable security definer set search_path = public as $$
   select exists (
-    select 1 from parent_students
+    select 1 from student_parents
     where parent_profile_id = auth.uid() and student_id = p_student
   );
 $$;
@@ -68,7 +68,7 @@ alter table teachers         enable row level security;
 alter table teacher_classes  enable row level security;
 alter table teacher_subjects enable row level security;
 alter table students         enable row level security;
-alter table parent_students  enable row level security;
+alter table student_parents  enable row level security;
 alter table terms            enable row level security;
 alter table exam_windows     enable row level security;
 alter table exams            enable row level security;
@@ -150,11 +150,11 @@ create policy "parents read their children" on students for select
 create policy "students read themselves" on students for select
   using (profile_id = auth.uid());
 
-create policy "parents read own links" on parent_students for select
+create policy "parents read own links" on student_parents for select
   using (parent_profile_id = auth.uid());
-create policy "admins manage parent links" on parent_students for all
+create policy "admins manage parent links" on student_parents for all
   using (exists (select 1 from students s
-                 where s.id = parent_students.student_id and is_admin_of(s.school_id)));
+                 where s.id = student_parents.student_id and is_admin_of(s.school_id)));
 
 -- ---------- exam windows (admin opens; teacher sees own) ----------
 create policy "staff read exam windows" on exam_windows for select

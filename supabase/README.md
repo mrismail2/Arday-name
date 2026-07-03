@@ -61,7 +61,7 @@ isticmaalaa keydka local-ka ah (prototype), marka `.env` la buuxiyo
 | `profiles` | isticmaale kasta (auth) + `role` + dugsiga uu ka tirsan yahay |
 | `subjects`, `classes`, `class_subjects` | maadooyinka iyo fasallada dugsi kasta |
 | `teachers`, `teacher_classes`, `teacher_subjects` | macalimiinta iyo xilkooda |
-| `students`, `parent_students` | ardayda + xiriirka waalidka ↔ ilmaha |
+| `students`, `student_parents` | ardayda + xiriirka waalidka ↔ ilmaha |
 | `terms`, `exam_windows`, `exams`, `results` | imtixaannada (admin ayaa fura windows) |
 | `attendance` | xaadiriska (hal diiwaan arday/maalin) |
 | `payments`, `billing_records` | maaliyadda |

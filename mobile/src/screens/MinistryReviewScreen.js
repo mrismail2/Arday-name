@@ -1,7 +1,7 @@
 import React, { useState, useMemo } from 'react';
 import { View, Text, StyleSheet, FlatList, TextInput, TouchableOpacity, ScrollView } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
-import Svg, { Defs, LinearGradient, Stop, Rect, Path, Circle } from 'react-native-svg';
+import Svg, { Defs, LinearGradient, Stop, Rect, Circle } from 'react-native-svg';
 import { useTheme } from '../theme/ThemeContext';
 import { shadow } from '../theme/colors';
 import { useLessons } from '../context/LessonsContext';
@@ -9,18 +9,6 @@ import Avatar from '../components/Avatar';
 import Badge from '../components/Badge';
 import Icon from '../components/Icon';
 import LessonDetailModal from '../components/LessonDetailModal';
-
-/* A small 5-point star, echoing the one on the Somaliland flag. */
-function FlagStar({ size = 20, color = '#0A2E6B' }) {
-  return (
-    <Svg width={size} height={size} viewBox="0 0 24 24">
-      <Path
-        d="M12 1.5l2.9 6.7 7.3.7-5.5 4.9 1.7 7.2L12 17l-6.4 4-1.7-7.2-5.5-4.9 7.3-.7z"
-        fill={color}
-      />
-    </Svg>
-  );
-}
 
 /* Ministry (Wasaarad) review portal — reached from the landing page, gated by
    the school's review code. The ministry is NOT a logged-in user: with a valid
@@ -70,18 +58,10 @@ export default function MinistryReviewScreen({ onBack }) {
 
             <View style={styles.emblem}>
               <View style={styles.emblemRing}>
-                <FlagStar size={30} color="#fff" />
+                <Icon name="shield" size={28} color="#fff" />
               </View>
             </View>
-            <Text style={styles.eyebrow}>JAMHUURIYADDA SOMALILAND</Text>
             <Text style={styles.ministryName}>Wasaaradda Waxbarashada{'\n'}iyo Sayniska</Text>
-
-            {/* flag-colour accent stripe: green · white · red */}
-            <View style={styles.flagStripe}>
-              <View style={[styles.flagBar, { backgroundColor: '#2A9D5C' }]} />
-              <View style={[styles.flagBar, { backgroundColor: '#fff' }]} />
-              <View style={[styles.flagBar, { backgroundColor: '#C8102E' }]} />
-            </View>
           </View>
 
           {/* ---- floating card: code entry, overlapping the banner ---- */}
@@ -92,7 +72,7 @@ export default function MinistryReviewScreen({ onBack }) {
               </View>
               <Text style={[styles.gateTitle, { color: c.ink }]}>Eegista Wasaaradda</Text>
               <Text style={[styles.gateSub, { color: c.muted }]}>
-                Portal-ka kormeerka Wasaaradda Waxbarashada iyo Sayniska — Somaliland.
+                Portal-ka kormeerka Wasaaradda Waxbarashada iyo Sayniska.
                 {'\n'}Geli lambarka eegista ee dugsigu ku siiyay si aad u aragto casharrada la ansixiyay.
               </Text>
 
@@ -188,10 +168,7 @@ const styles = StyleSheet.create({
     width: 72, height: 72, borderRadius: 36, alignItems: 'center', justifyContent: 'center',
     backgroundColor: 'rgba(255,255,255,0.12)', borderWidth: 1.5, borderColor: 'rgba(255,255,255,0.35)',
   },
-  eyebrow: { color: 'rgba(255,255,255,0.65)', fontSize: 11, fontWeight: '800', letterSpacing: 1.4 },
-  ministryName: { color: '#fff', fontSize: 19, fontWeight: '800', textAlign: 'center', marginTop: 6, lineHeight: 25 },
-  flagStripe: { flexDirection: 'row', width: 76, height: 5, borderRadius: 3, overflow: 'hidden', marginTop: 16 },
-  flagBar: { flex: 1 },
+  ministryName: { color: '#fff', fontSize: 20, fontWeight: '800', textAlign: 'center', lineHeight: 26 },
 
   gateWrap: { flex: 1, paddingHorizontal: 20, marginTop: -60, paddingBottom: 28 },
   gateCard: { borderWidth: 1, borderRadius: 22, padding: 26, alignItems: 'center', maxWidth: 420, width: '100%', alignSelf: 'center' },
